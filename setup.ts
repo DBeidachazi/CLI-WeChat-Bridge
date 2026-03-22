@@ -1,27 +1,21 @@
 #!/usr/bin/env bun
 /**
- * WeChat Channel Setup — standalone QR login tool.
+ * WeChat channel setup.
  *
- * Run this BEFORE starting the channel to authenticate with WeChat:
+ * Run this before starting the channel server:
  *   bun setup.ts
- *
- * Credentials are saved to ~/.claude/channels/wechat/account.json.
- * The channel server reads them at startup.
  */
 
-import crypto from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
+import readline from "node:readline";
 
-const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
-const BOT_TYPE = "3";
-const CREDENTIALS_DIR = path.join(
-  process.env.HOME || "~",
-  ".claude",
-  "channels",
-  "wechat",
-);
-const CREDENTIALS_FILE = path.join(CREDENTIALS_DIR, "account.json");
+import {
+  BOT_TYPE,
+  CREDENTIALS_FILE,
+  DEFAULT_BASE_URL,
+  ensureChannelDataDir,
+  migrateLegacyChannelFiles,
+} from "./channel-config.ts";
 
 interface QRCodeResponse {
   qrcode: string;
@@ -36,11 +30,32 @@ interface QRStatusResponse {
   ilink_user_id?: string;
 }
 
+type StoredAccount = {
+  token: string;
+  baseUrl: string;
+  accountId: string;
+  userId?: string;
+  savedAt: string;
+};
+
+function loadExistingCredentials(): StoredAccount | null {
+  try {
+    if (!fs.existsSync(CREDENTIALS_FILE)) {
+      return null;
+    }
+    return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8")) as StoredAccount;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchQRCode(baseUrl: string): Promise<QRCodeResponse> {
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const url = `${base}ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`QR fetch failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`QR fetch failed: ${res.status}`);
+  }
   return (await res.json()) as QRCodeResponse;
 }
 
@@ -52,13 +67,16 @@ async function pollQRStatus(
   const url = `${base}ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
+
   try {
     const res = await fetch(url, {
       headers: { "iLink-App-ClientVersion": "1" },
       signal: controller.signal,
     });
     clearTimeout(timer);
-    if (!res.ok) throw new Error(`QR status failed: ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`QR status failed: ${res.status}`);
+    }
     return (await res.json()) as QRStatusResponse;
   } catch (err) {
     clearTimeout(timer);
@@ -69,53 +87,58 @@ async function pollQRStatus(
   }
 }
 
-async function main() {
-  // Check existing credentials
-  if (fs.existsSync(CREDENTIALS_FILE)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
-      console.log(`已有保存的账号: ${existing.accountId}`);
-      console.log(`保存时间: ${existing.savedAt}`);
-      console.log();
-      const readline = await import("node:readline");
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      const answer = await new Promise<string>((resolve) => {
-        rl.question("是否重新登录？(y/N) ", resolve);
-      });
-      rl.close();
-      if (answer.toLowerCase() !== "y") {
-        console.log("保持现有凭据，退出。");
-        process.exit(0);
-      }
-    } catch {
-      // ignore
-    }
+async function askYesNo(prompt: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(prompt, resolve);
+    });
+    return answer.trim().toLowerCase() === "y";
+  } finally {
+    rl.close();
   }
+}
 
-  console.log("正在获取微信登录二维码...\n");
-  const qrResp = await fetchQRCode(DEFAULT_BASE_URL);
-
-  // Display QR code
+async function printQRCode(qrContent: string): Promise<void> {
   try {
     const qrterm = await import("qrcode-terminal");
     await new Promise<void>((resolve) => {
-      qrterm.default.generate(
-        qrResp.qrcode_img_content,
-        { small: true },
-        (qr: string) => {
-          console.log(qr);
-          resolve();
-        },
-      );
+      qrterm.default.generate(qrContent, { small: true }, (qr: string) => {
+        console.log(qr);
+        resolve();
+      });
     });
   } catch {
-    console.log(`请在浏览器中打开此链接扫码: ${qrResp.qrcode_img_content}\n`);
+    console.log(`Open this QR code URL in a browser: ${qrContent}\n`);
+  }
+}
+
+async function main() {
+  migrateLegacyChannelFiles((message) => console.log(message));
+
+  const existing = loadExistingCredentials();
+  if (existing) {
+    console.log(`Found saved account: ${existing.accountId}`);
+    console.log(`Saved at: ${existing.savedAt}`);
+    console.log(`Credentials file: ${CREDENTIALS_FILE}`);
+    console.log();
+
+    const shouldRelogin = await askYesNo("Log in again? (y/N) ");
+    if (!shouldRelogin) {
+      console.log("Keeping existing credentials.");
+      return;
+    }
   }
 
-  console.log("请用微信扫描上方二维码...\n");
+  console.log("Fetching WeChat login QR code...\n");
+  const qrResp = await fetchQRCode(DEFAULT_BASE_URL);
+  await printQRCode(qrResp.qrcode_img_content);
+
+  console.log("Scan the QR code in WeChat, then confirm on your phone.\n");
 
   const deadline = Date.now() + 480_000;
   let scannedPrinted = false;
@@ -129,21 +152,21 @@ async function main() {
         break;
       case "scaned":
         if (!scannedPrinted) {
-          console.log("\n👀 已扫码，请在微信中确认...");
+          console.log("\nQR code scanned. Confirm the login in WeChat...");
           scannedPrinted = true;
         }
         break;
       case "expired":
-        console.log("\n二维码已过期，请重新运行 setup。");
+        console.log("\nThe QR code expired. Run setup again.");
         process.exit(1);
         break;
       case "confirmed": {
         if (!status.ilink_bot_id || !status.bot_token) {
-          console.error("\n登录失败：服务器未返回完整信息。");
+          console.error("\nLogin failed: missing bot credentials from server.");
           process.exit(1);
         }
 
-        const account = {
+        const account: StoredAccount = {
           token: status.bot_token,
           baseUrl: status.baseurl || DEFAULT_BASE_URL,
           accountId: status.ilink_bot_id,
@@ -151,38 +174,34 @@ async function main() {
           savedAt: new Date().toISOString(),
         };
 
-        fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
-        fs.writeFileSync(
-          CREDENTIALS_FILE,
-          JSON.stringify(account, null, 2),
-          "utf-8",
-        );
+        ensureChannelDataDir();
+        fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(account, null, 2), "utf-8");
         try {
           fs.chmodSync(CREDENTIALS_FILE, 0o600);
         } catch {
-          // best-effort
+          // Best effort on Windows.
         }
 
-        console.log(`\n✅ 微信连接成功！`);
-        console.log(`   账号 ID: ${account.accountId}`);
-        console.log(`   用户 ID: ${account.userId}`);
-        console.log(`   凭据保存至: ${CREDENTIALS_FILE}`);
+        console.log("\nWeChat login completed.");
+        console.log(`Account ID: ${account.accountId}`);
+        console.log(`User ID: ${account.userId ?? "(unknown)"}`);
+        console.log(`Credentials saved to: ${CREDENTIALS_FILE}`);
         console.log();
-        console.log("现在可以启动 Claude Code 通道：");
-        console.log(
-          "  claude --dangerously-load-development-channels server:wechat",
-        );
-        process.exit(0);
+        console.log("Start Claude Code with:");
+        console.log("  claude --dangerously-load-development-channels server:wechat");
+        return;
       }
     }
-    await new Promise((r) => setTimeout(r, 1000));
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  console.log("\n登录超时，请重新运行。");
+  console.log("\nLogin timed out. Run setup again.");
   process.exit(1);
 }
 
 main().catch((err) => {
-  console.error(`错误: ${err}`);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`Error: ${message}`);
   process.exit(1);
 });

@@ -2,7 +2,7 @@
   "mcpServers": {
     "wechat": {
       "command": "bun",
-      "args": ["c:/Users/unlin/Desktop/Github/claude-code-wechat-channel/wechat-channel.ts"]
+      "args": ["./wechat-channel.ts"]
     }
   }
 }

@@ -1,14 +1,16 @@
 {
   "name": "claude-code-wechat-channel",
   "version": "0.1.0",
-  "description": "Claude Code Channel plugin for WeChat — bridge WeChat messages into Claude Code sessions via the official ilink API",
+  "description": "Claude Code channel server for WeChat via the official ilink API",
   "type": "module",
   "private": true,
   "scripts": {
     "setup": "bun setup.ts",
-    "start": "bun wechat-channel.ts"
+    "start": "bun wechat-channel.ts",
+    "check": "bun wechat-channel.ts --check"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "qrcode-terminal": "^0.12.0"
   },
