@@ -1,7 +1,7 @@
 {
   "name": "claude-code-wechat-channel",
   "version": "0.1.0",
-  "description": "Claude Code channel server for WeChat via the official ilink API",
+  "description": "WeChat MCP server via the official ilink API",
   "type": "module",
   "private": true,
   "scripts": {

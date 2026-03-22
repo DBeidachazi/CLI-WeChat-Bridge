@@ -15,6 +15,10 @@ export const CHANNEL_DATA_DIR = process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR?.trim
 
 export const CREDENTIALS_FILE = path.join(CHANNEL_DATA_DIR, "account.json");
 export const SYNC_BUF_FILE = path.join(CHANNEL_DATA_DIR, "sync_buf.txt");
+export const CONTEXT_CACHE_FILE = path.join(
+  CHANNEL_DATA_DIR,
+  "context_tokens.json",
+);
 
 const LEGACY_CHANNEL_DATA_DIR = path.join(
   MODULE_DIR,

@@ -1,12 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Claude Code WeChat channel server.
+ * WeChat MCP server.
  *
- * Flow:
- *   1. Ensure credentials exist, or run QR login on first start.
- *   2. Long-poll the WeChat ilink API for inbound messages.
- *   3. Forward inbound messages to Claude Code over MCP channel notifications.
- *   4. Expose a reply tool so Claude can send text replies back to WeChat.
+ * This server exposes standard MCP tools instead of relying on
+ * Claude's preview-only channel push API.
  */
 
 import crypto from "node:crypto";
@@ -20,21 +17,19 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  BOT_TYPE,
+  CONTEXT_CACHE_FILE,
   CREDENTIALS_FILE,
-  DEFAULT_BASE_URL,
   ensureChannelDataDir,
   migrateLegacyChannelFiles,
   SYNC_BUF_FILE,
 } from "./channel-config.ts";
 
-const CHANNEL_NAME = "wechat";
-const CHANNEL_VERSION = "0.1.0";
+const SERVER_NAME = "wechat";
+const SERVER_VERSION = "0.2.0";
+const CHANNEL_VERSION = "0.2.0";
 
-const LONG_POLL_TIMEOUT_MS = 35_000;
-const MAX_CONSECUTIVE_FAILURES = 3;
-const BACKOFF_DELAY_MS = 30_000;
-const RETRY_DELAY_MS = 2_000;
+const DEFAULT_POLL_TIMEOUT_MS = 1_000;
+const MAX_POLL_TIMEOUT_MS = 35_000;
 const RECENT_MESSAGE_CACHE_SIZE = 500;
 
 const MSG_TYPE_USER = 1;
@@ -49,6 +44,30 @@ type AccountData = {
   accountId: string;
   userId?: string;
   savedAt: string;
+};
+
+type ContextTokenState = Record<string, string>;
+
+type FetchMessagesArgs = {
+  waitForNew: boolean;
+  timeoutMs: number;
+};
+
+type ReplyArgs = {
+  senderId: string;
+  text: string;
+};
+
+type ResetSyncArgs = {
+  clearContextCache: boolean;
+};
+
+type MessageSummary = {
+  senderId: string;
+  sender: string;
+  sessionId: string;
+  createdAt: string;
+  text: string;
 };
 
 interface TextItem {
@@ -85,49 +104,85 @@ interface GetUpdatesResp {
   errmsg?: string;
   msgs?: WeixinMessage[];
   get_updates_buf?: string;
-  longpolling_timeout_ms?: number;
-}
-
-interface QRCodeResponse {
-  qrcode: string;
-  qrcode_img_content: string;
-}
-
-interface QRStatusResponse {
-  status: "wait" | "scaned" | "confirmed" | "expired";
-  bot_token?: string;
-  ilink_bot_id?: string;
-  baseurl?: string;
-  ilink_user_id?: string;
 }
 
 function log(message: string): void {
-  process.stderr.write(`[wechat-channel] ${message}\n`);
+  process.stderr.write(`[wechat-mcp] ${message}\n`);
 }
 
 function logError(message: string): void {
-  process.stderr.write(`[wechat-channel] ERROR: ${message}\n`);
+  process.stderr.write(`[wechat-mcp] ERROR: ${message}\n`);
 }
 
-function loadCredentials(): AccountData | null {
+function readJsonFile<T>(filePath: string): T | null {
   try {
-    if (!fs.existsSync(CREDENTIALS_FILE)) {
+    if (!fs.existsSync(filePath)) {
       return null;
     }
-    return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8")) as AccountData;
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
   } catch (err) {
-    logError(`Failed to read credentials from ${CREDENTIALS_FILE}: ${String(err)}`);
+    logError(`Failed to read ${filePath}: ${String(err)}`);
     return null;
   }
 }
 
-function saveCredentials(data: AccountData): void {
+function writeJsonFile(filePath: string, value: unknown): void {
   ensureChannelDataDir();
-  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(data, null, 2), "utf-8");
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), "utf-8");
+}
+
+function loadCredentials(): AccountData | null {
+  return readJsonFile<AccountData>(CREDENTIALS_FILE);
+}
+
+function loadContextTokenState(): ContextTokenState {
+  return readJsonFile<ContextTokenState>(CONTEXT_CACHE_FILE) ?? {};
+}
+
+const contextTokenCache = new Map<string, string>(
+  Object.entries(loadContextTokenState()),
+);
+
+function persistContextTokenState(): void {
+  writeJsonFile(CONTEXT_CACHE_FILE, Object.fromEntries(contextTokenCache));
+}
+
+function cacheContextToken(userId: string, token: string): void {
+  contextTokenCache.set(userId, token);
+  persistContextTokenState();
+}
+
+function clearContextTokenCache(): void {
+  contextTokenCache.clear();
+  if (fs.existsSync(CONTEXT_CACHE_FILE)) {
+    fs.rmSync(CONTEXT_CACHE_FILE, { force: true });
+  }
+}
+
+function getCachedContextToken(userId: string): string | undefined {
+  return contextTokenCache.get(userId);
+}
+
+function loadSyncBuffer(): string {
   try {
-    fs.chmodSync(CREDENTIALS_FILE, 0o600);
-  } catch {
-    // Best effort on Windows.
+    if (!fs.existsSync(SYNC_BUF_FILE)) {
+      return "";
+    }
+    return fs.readFileSync(SYNC_BUF_FILE, "utf-8");
+  } catch (err) {
+    logError(`Failed to read sync state: ${String(err)}`);
+    return "";
+  }
+}
+
+function saveSyncBuffer(syncBuffer: string): void {
+  ensureChannelDataDir();
+  fs.writeFileSync(SYNC_BUF_FILE, syncBuffer, "utf-8");
+}
+
+function clearSyncBuffer(): void {
+  if (fs.existsSync(SYNC_BUF_FILE)) {
+    fs.rmSync(SYNC_BUF_FILE, { force: true });
   }
 }
 
@@ -185,116 +240,66 @@ async function apiFetch(params: {
   }
 }
 
-async function fetchQRCode(baseUrl: string): Promise<QRCodeResponse> {
-  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const url = new URL(
-    `ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,
-    base,
-  );
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    throw new Error(`QR fetch failed: ${res.status}`);
-  }
-  return (await res.json()) as QRCodeResponse;
-}
-
-async function pollQRStatus(
-  baseUrl: string,
-  qrcode: string,
-): Promise<QRStatusResponse> {
-  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const url = new URL(
-    `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
-    base,
-  );
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 35_000);
-
+async function getUpdates(
+  account: AccountData,
+  getUpdatesBuf: string,
+  timeoutMs: number,
+): Promise<GetUpdatesResp> {
   try {
-    const res = await fetch(url.toString(), {
-      headers: { "iLink-App-ClientVersion": "1" },
-      signal: controller.signal,
+    const raw = await apiFetch({
+      baseUrl: account.baseUrl,
+      endpoint: "ilink/bot/getupdates",
+      body: JSON.stringify({
+        get_updates_buf: getUpdatesBuf,
+        base_info: { channel_version: CHANNEL_VERSION },
+      }),
+      token: account.token,
+      timeoutMs,
     });
-    clearTimeout(timer);
-    if (!res.ok) {
-      throw new Error(`QR status failed: ${res.status}`);
-    }
-    return (await res.json()) as QRStatusResponse;
+    return JSON.parse(raw) as GetUpdatesResp;
   } catch (err) {
-    clearTimeout(timer);
     if (err instanceof Error && err.name === "AbortError") {
-      return { status: "wait" };
+      return { ret: 0, msgs: [], get_updates_buf: getUpdatesBuf };
     }
     throw err;
   }
 }
 
-async function doQRLogin(baseUrl: string): Promise<AccountData | null> {
-  log("Fetching WeChat login QR code...");
-  const qrResp = await fetchQRCode(baseUrl);
+function generateClientId(): string {
+  return `wechat-mcp:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+}
 
-  log("");
-  log("Scan the QR code in WeChat:");
-  try {
-    const qrterm = await import("qrcode-terminal");
-    await new Promise<void>((resolve) => {
-      qrterm.default.generate(
-        qrResp.qrcode_img_content,
-        { small: true },
-        (qr: string) => {
-          process.stderr.write(`${qr}\n`);
-          resolve();
-        },
-      );
-    });
-  } catch {
-    log(`QR code URL: ${qrResp.qrcode_img_content}`);
+async function sendTextMessage(
+  account: AccountData,
+  to: string,
+  text: string,
+  contextToken: string,
+): Promise<string> {
+  const trimmedText = text.trim();
+  if (!trimmedText) {
+    throw new Error("Reply text cannot be empty.");
   }
 
-  log("Waiting for WeChat confirmation...");
-  const deadline = Date.now() + 480_000;
-  let scannedPrinted = false;
-
-  while (Date.now() < deadline) {
-    const status = await pollQRStatus(baseUrl, qrResp.qrcode);
-
-    switch (status.status) {
-      case "wait":
-        break;
-      case "scaned":
-        if (!scannedPrinted) {
-          log("QR code scanned. Confirm the login in WeChat...");
-          scannedPrinted = true;
-        }
-        break;
-      case "expired":
-        log("The QR code expired. Restart the server to try again.");
-        return null;
-      case "confirmed": {
-        if (!status.ilink_bot_id || !status.bot_token) {
-          logError("Login was confirmed but bot credentials were missing.");
-          return null;
-        }
-
-        const account: AccountData = {
-          token: status.bot_token,
-          baseUrl: status.baseurl || baseUrl,
-          accountId: status.ilink_bot_id,
-          userId: status.ilink_user_id,
-          savedAt: new Date().toISOString(),
-        };
-
-        saveCredentials(account);
-        log(`WeChat login completed for ${account.accountId}.`);
-        return account;
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  log("Login timed out.");
-  return null;
+  const clientId = generateClientId();
+  await apiFetch({
+    baseUrl: account.baseUrl,
+    endpoint: "ilink/bot/sendmessage",
+    body: JSON.stringify({
+      msg: {
+        from_user_id: "",
+        to_user_id: to,
+        client_id: clientId,
+        message_type: MSG_TYPE_BOT,
+        message_state: MSG_STATE_FINISH,
+        item_list: [{ type: MSG_ITEM_TEXT, text_item: { text: trimmedText } }],
+        context_token: contextToken,
+      },
+      base_info: { channel_version: CHANNEL_VERSION },
+    }),
+    token: account.token,
+    timeoutMs: 15_000,
+  });
+  return clientId;
 }
 
 function extractReferenceLabel(item: MessageItem): string | null {
@@ -307,7 +312,6 @@ function extractReferenceLabel(item: MessageItem): string | null {
   if (ref.title?.trim()) {
     parts.push(ref.title.trim());
   }
-
   const quotedText = ref.message_item?.text_item?.text?.trim();
   if (quotedText) {
     parts.push(quotedText);
@@ -347,79 +351,6 @@ function extractTextFromMessage(msg: WeixinMessage): string {
   return lines.join("\n").trim();
 }
 
-const contextTokenCache = new Map<string, string>();
-
-function cacheContextToken(userId: string, token: string): void {
-  contextTokenCache.set(userId, token);
-}
-
-function getCachedContextToken(userId: string): string | undefined {
-  return contextTokenCache.get(userId);
-}
-
-async function getUpdates(
-  baseUrl: string,
-  token: string,
-  getUpdatesBuf: string,
-): Promise<GetUpdatesResp> {
-  try {
-    const raw = await apiFetch({
-      baseUrl,
-      endpoint: "ilink/bot/getupdates",
-      body: JSON.stringify({
-        get_updates_buf: getUpdatesBuf,
-        base_info: { channel_version: CHANNEL_VERSION },
-      }),
-      token,
-      timeoutMs: LONG_POLL_TIMEOUT_MS,
-    });
-    return JSON.parse(raw) as GetUpdatesResp;
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      return { ret: 0, msgs: [], get_updates_buf: getUpdatesBuf };
-    }
-    throw err;
-  }
-}
-
-function generateClientId(): string {
-  return `claude-code-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
-}
-
-async function sendTextMessage(
-  baseUrl: string,
-  token: string,
-  to: string,
-  text: string,
-  contextToken: string,
-): Promise<string> {
-  const trimmedText = text.trim();
-  if (!trimmedText) {
-    throw new Error("Reply text cannot be empty.");
-  }
-
-  const clientId = generateClientId();
-  await apiFetch({
-    baseUrl,
-    endpoint: "ilink/bot/sendmessage",
-    body: JSON.stringify({
-      msg: {
-        from_user_id: "",
-        to_user_id: to,
-        client_id: clientId,
-        message_type: MSG_TYPE_BOT,
-        message_state: MSG_STATE_FINISH,
-        item_list: [{ type: MSG_ITEM_TEXT, text_item: { text: trimmedText } }],
-        context_token: contextToken,
-      },
-      base_info: { channel_version: CHANNEL_VERSION },
-    }),
-    token,
-    timeoutMs: 15_000,
-  });
-  return clientId;
-}
-
 const recentMessageKeys = new Set<string>();
 const recentMessageOrder: string[] = [];
 
@@ -450,15 +381,76 @@ function rememberMessage(key: string): boolean {
   return true;
 }
 
-function parseWechatReplyArguments(args: unknown):
-  | { senderId: string; text: string }
-  | { error: string } {
-  if (!args || typeof args !== "object") {
-    return { error: "Missing tool arguments." };
-  }
+function clearRecentMessages(): void {
+  recentMessageKeys.clear();
+  recentMessageOrder.length = 0;
+}
 
-  const senderId = (args as { sender_id?: unknown }).sender_id;
-  const text = (args as { text?: unknown }).text;
+function formatTimestamp(timestampMs?: number): string {
+  if (!timestampMs) {
+    return "(unknown)";
+  }
+  return new Date(timestampMs).toISOString();
+}
+
+function normalizeSender(senderId: string): string {
+  return senderId.split("@")[0] || senderId;
+}
+
+function requireAccount():
+  | { account: AccountData }
+  | { error: string } {
+  const account = loadCredentials();
+  if (!account) {
+    return {
+      error: `No saved WeChat credentials found. Run "bun run setup" first. Expected file: ${CREDENTIALS_FILE}`,
+    };
+  }
+  return { account };
+}
+
+function asObject(args: unknown): Record<string, unknown> {
+  return args && typeof args === "object"
+    ? (args as Record<string, unknown>)
+    : {};
+}
+
+function clampTimeoutMs(value: unknown, fallbackMs: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallbackMs;
+  }
+  const rounded = Math.floor(value);
+  return Math.min(Math.max(rounded, 1_000), MAX_POLL_TIMEOUT_MS);
+}
+
+function parseFetchMessagesArgs(args: unknown): FetchMessagesArgs {
+  const record = asObject(args);
+  const waitForNew =
+    typeof record.wait_for_new === "boolean" ? record.wait_for_new : false;
+  const fallbackTimeout = waitForNew ? 15_000 : DEFAULT_POLL_TIMEOUT_MS;
+
+  return {
+    waitForNew,
+    timeoutMs: clampTimeoutMs(record.timeout_ms, fallbackTimeout),
+  };
+}
+
+function parseResetSyncArgs(args: unknown): ResetSyncArgs {
+  const record = asObject(args);
+  return {
+    clearContextCache:
+      typeof record.clear_context_cache === "boolean"
+        ? record.clear_context_cache
+        : false,
+  };
+}
+
+function parseReplyArgs(args: unknown):
+  | { value: ReplyArgs }
+  | { error: string } {
+  const record = asObject(args);
+  const senderId = record.sender_id;
+  const text = record.text;
 
   if (typeof senderId !== "string" || !senderId.trim()) {
     return { error: "sender_id must be a non-empty string." };
@@ -468,25 +460,153 @@ function parseWechatReplyArguments(args: unknown):
   }
 
   return {
-    senderId: senderId.trim(),
-    text: text.trim(),
+    value: {
+      senderId: senderId.trim(),
+      text: text.trim(),
+    },
   };
 }
 
+async function fetchMessages(
+  args: FetchMessagesArgs,
+): Promise<string> {
+  const accountResult = requireAccount();
+  if ("error" in accountResult) {
+    return `error: ${accountResult.error}`;
+  }
+
+  const syncBuffer = loadSyncBuffer();
+  const resp = await getUpdates(accountResult.account, syncBuffer, args.timeoutMs);
+
+  const isError =
+    (resp.ret !== undefined && resp.ret !== 0) ||
+    (resp.errcode !== undefined && resp.errcode !== 0);
+  if (isError) {
+    return `error: getUpdates failed: ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""}`;
+  }
+
+  if (resp.get_updates_buf) {
+    saveSyncBuffer(resp.get_updates_buf);
+  }
+
+  const messages: MessageSummary[] = [];
+
+  for (const msg of resp.msgs ?? []) {
+    if (msg.message_type !== MSG_TYPE_USER) {
+      continue;
+    }
+
+    const text = extractTextFromMessage(msg);
+    if (!text) {
+      continue;
+    }
+
+    const senderId = msg.from_user_id ?? "unknown";
+    const messageKey = buildMessageKey(msg);
+    if (!rememberMessage(messageKey)) {
+      continue;
+    }
+
+    if (msg.context_token) {
+      cacheContextToken(senderId, msg.context_token);
+    }
+
+    messages.push({
+      senderId,
+      sender: normalizeSender(senderId),
+      sessionId: msg.session_id ?? "",
+      createdAt: formatTimestamp(msg.create_time_ms),
+      text,
+    });
+  }
+
+  if (!messages.length) {
+    return "No new WeChat messages.";
+  }
+
+  const blocks = messages.map((message, index) =>
+    [
+      `[${index + 1}]`,
+      `sender_id: ${message.senderId}`,
+      `sender: ${message.sender}`,
+      `session_id: ${message.sessionId || "(unknown)"}`,
+      `created_at: ${message.createdAt}`,
+      "text:",
+      message.text,
+    ].join("\n"),
+  );
+
+  return [
+    `Fetched ${messages.length} new WeChat message${messages.length === 1 ? "" : "s"}.`,
+    "",
+    ...blocks,
+  ].join("\n");
+}
+
+function getStatusText(): string {
+  const account = loadCredentials();
+  const syncExists = fs.existsSync(SYNC_BUF_FILE);
+  const contextExists = fs.existsSync(CONTEXT_CACHE_FILE);
+
+  return [
+    `credentials_file: ${CREDENTIALS_FILE}`,
+    `credentials_present: ${account ? "yes" : "no"}`,
+    `sync_state_file: ${SYNC_BUF_FILE}`,
+    `sync_state_present: ${syncExists ? "yes" : "no"}`,
+    `context_cache_file: ${CONTEXT_CACHE_FILE}`,
+    `context_cache_present: ${contextExists ? "yes" : "no"}`,
+    `cached_context_count: ${contextTokenCache.size}`,
+    `account_id: ${account?.accountId ?? "(none)"}`,
+    `user_id: ${account?.userId ?? "(none)"}`,
+    `saved_at: ${account?.savedAt ?? "(none)"}`,
+  ].join("\n");
+}
+
+function resetSyncState(args: ResetSyncArgs): string {
+  clearSyncBuffer();
+  clearRecentMessages();
+  if (args.clearContextCache) {
+    clearContextTokenCache();
+  }
+
+  return args.clearContextCache
+    ? "Reset sync state and cleared cached context tokens."
+    : "Reset sync state.";
+}
+
+async function replyToMessage(args: ReplyArgs): Promise<string> {
+  const accountResult = requireAccount();
+  if ("error" in accountResult) {
+    return `error: ${accountResult.error}`;
+  }
+
+  const contextToken = getCachedContextToken(args.senderId);
+  if (!contextToken) {
+    return `error: no cached context token for ${args.senderId}. Run wechat_fetch_messages first.`;
+  }
+
+  await sendTextMessage(
+    accountResult.account,
+    args.senderId,
+    args.text,
+    contextToken,
+  );
+
+  return `Sent reply to ${args.senderId}.`;
+}
+
 const mcp = new Server(
-  { name: CHANNEL_NAME, version: CHANNEL_VERSION },
+  { name: SERVER_NAME, version: SERVER_VERSION },
   {
     capabilities: {
-      experimental: { "claude/channel": {} },
       tools: {},
     },
     instructions: [
-      `Messages from WeChat users arrive as <channel source="wechat" sender="..." sender_id="...">.`,
-      "Reply with the wechat_reply tool and pass the sender_id from the inbound tag.",
-      "Messages are from real WeChat users via the WeChat ClawBot interface.",
-      "Respond naturally in Chinese unless the user writes in another language.",
-      "Keep replies concise because WeChat is a chat app.",
-      "Use plain text only. Do not rely on Markdown formatting.",
+      "Use wechat_fetch_messages to pull new inbound WeChat messages.",
+      "Use wechat_reply to send a plain-text response.",
+      "Run wechat_fetch_messages before replying so the sender's context token is cached.",
+      "Use wechat_get_status to inspect auth and local state.",
+      "Use wechat_reset_sync if you need to clear local sync state.",
     ].join("\n"),
   },
 );
@@ -494,211 +614,100 @@ const mcp = new Server(
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
+      name: "wechat_get_status",
+      description: "Show saved account information and local MCP state files.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "wechat_fetch_messages",
+      description: "Pull new WeChat messages using the saved sync cursor.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          wait_for_new: {
+            type: "boolean",
+            description: "If true, long-poll briefly for new messages before returning.",
+          },
+          timeout_ms: {
+            type: "number",
+            description: "Polling timeout in milliseconds. Max 35000.",
+          },
+        },
+      },
+    },
+    {
       name: "wechat_reply",
-      description: "Send a text reply back to the WeChat user",
+      description: "Send a plain-text reply to a WeChat sender_id.",
       inputSchema: {
         type: "object" as const,
         properties: {
           sender_id: {
             type: "string",
-            description: "The sender_id from the inbound channel tag",
+            description: "The sender_id from wechat_fetch_messages output.",
           },
           text: {
             type: "string",
-            description: "The plain-text message to send",
+            description: "The plain-text message to send.",
           },
         },
         required: ["sender_id", "text"],
       },
     },
+    {
+      name: "wechat_reset_sync",
+      description: "Clear saved sync state so future fetches restart from a fresh cursor.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          clear_context_cache: {
+            type: "boolean",
+            description: "If true, also clear cached reply context tokens.",
+          },
+        },
+      },
+    },
   ],
 }));
 
-let activeAccount: AccountData | null = null;
+function textResult(text: string) {
+  return {
+    content: [{ type: "text" as const, text }],
+  };
+}
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-  if (req.params.name !== "wechat_reply") {
-    throw new Error(`unknown tool: ${req.params.name}`);
-  }
-
-  const parsed = parseWechatReplyArguments(req.params.arguments);
-  if ("error" in parsed) {
-    return {
-      content: [{ type: "text" as const, text: `error: ${parsed.error}` }],
-    };
-  }
-
-  if (!activeAccount) {
-    return {
-      content: [{ type: "text" as const, text: "error: not logged in" }],
-    };
-  }
-
-  const contextToken = getCachedContextToken(parsed.senderId);
-  if (!contextToken) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `error: no context token for ${parsed.senderId}. The user may need to send a message first.`,
-        },
-      ],
-    };
-  }
-
-  try {
-    await sendTextMessage(
-      activeAccount.baseUrl,
-      activeAccount.token,
-      parsed.senderId,
-      parsed.text,
-      contextToken,
-    );
-    return { content: [{ type: "text" as const, text: "sent" }] };
-  } catch (err) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `send failed: ${String(err)}`,
-        },
-      ],
-    };
+  switch (req.params.name) {
+    case "wechat_get_status":
+      return textResult(getStatusText());
+    case "wechat_fetch_messages":
+      return textResult(await fetchMessages(parseFetchMessagesArgs(req.params.arguments)));
+    case "wechat_reset_sync":
+      return textResult(resetSyncState(parseResetSyncArgs(req.params.arguments)));
+    case "wechat_reply": {
+      const parsed = parseReplyArgs(req.params.arguments);
+      if ("error" in parsed) {
+        return textResult(`error: ${parsed.error}`);
+      }
+      return textResult(await replyToMessage(parsed.value));
+    }
+    default:
+      throw new Error(`unknown tool: ${req.params.name}`);
   }
 });
-
-async function startPolling(account: AccountData): Promise<never> {
-  const { baseUrl, token } = account;
-  let getUpdatesBuf = "";
-  let consecutiveFailures = 0;
-
-  try {
-    if (fs.existsSync(SYNC_BUF_FILE)) {
-      getUpdatesBuf = fs.readFileSync(SYNC_BUF_FILE, "utf-8");
-      if (getUpdatesBuf) {
-        log(`Recovered sync state from ${SYNC_BUF_FILE}.`);
-      }
-    }
-  } catch (err) {
-    logError(`Failed to load sync state: ${String(err)}`);
-  }
-
-  log("Starting WeChat long-poll loop...");
-
-  while (true) {
-    try {
-      const resp = await getUpdates(baseUrl, token, getUpdatesBuf);
-
-      const isError =
-        (resp.ret !== undefined && resp.ret !== 0) ||
-        (resp.errcode !== undefined && resp.errcode !== 0);
-      if (isError) {
-        consecutiveFailures++;
-        logError(
-          `getUpdates failed: ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""}`,
-        );
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          logError(
-            `Backing off for ${BACKOFF_DELAY_MS / 1000}s after ${MAX_CONSECUTIVE_FAILURES} consecutive failures.`,
-          );
-          consecutiveFailures = 0;
-          await new Promise((resolve) => setTimeout(resolve, BACKOFF_DELAY_MS));
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-        }
-        continue;
-      }
-
-      consecutiveFailures = 0;
-
-      if (resp.get_updates_buf) {
-        getUpdatesBuf = resp.get_updates_buf;
-        try {
-          ensureChannelDataDir();
-          fs.writeFileSync(SYNC_BUF_FILE, getUpdatesBuf, "utf-8");
-        } catch (err) {
-          logError(`Failed to persist sync state: ${String(err)}`);
-        }
-      }
-
-      for (const msg of resp.msgs ?? []) {
-        if (msg.message_type !== MSG_TYPE_USER) {
-          continue;
-        }
-
-        const text = extractTextFromMessage(msg);
-        if (!text) {
-          continue;
-        }
-
-        const senderId = msg.from_user_id ?? "unknown";
-        const messageKey = buildMessageKey(msg);
-        if (!rememberMessage(messageKey)) {
-          continue;
-        }
-
-        if (msg.context_token) {
-          cacheContextToken(senderId, msg.context_token);
-        }
-
-        log(`Inbound message from ${senderId}: ${text.slice(0, 80)}`);
-
-        await mcp.notification({
-          method: "notifications/claude/channel",
-          params: {
-            content: text,
-            meta: {
-              sender: senderId.split("@")[0] || senderId,
-              sender_id: senderId,
-            },
-          },
-        });
-      }
-    } catch (err) {
-      consecutiveFailures++;
-      logError(`Polling error: ${String(err)}`);
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        consecutiveFailures = 0;
-        await new Promise((resolve) => setTimeout(resolve, BACKOFF_DELAY_MS));
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      }
-    }
-  }
-}
 
 async function main() {
   migrateLegacyChannelFiles(log);
 
   if (process.argv.includes("--check")) {
-    log(`Credentials file: ${CREDENTIALS_FILE}`);
-    log(`Sync state file: ${SYNC_BUF_FILE}`);
-    const account = loadCredentials();
-    if (account) {
-      log(`Saved account detected: ${account.accountId}`);
-      process.exit(0);
-    }
-    log("No saved WeChat credentials found.");
-    process.exit(1);
+    log(getStatusText());
+    process.exit(0);
   }
 
   await mcp.connect(new StdioServerTransport());
-  log("MCP transport connected.");
-
-  let account = loadCredentials();
-  if (!account) {
-    log("No saved credentials found. Starting QR login...");
-    account = await doQRLogin(DEFAULT_BASE_URL);
-    if (!account) {
-      logError("Login failed. Exiting.");
-      process.exit(1);
-    }
-  } else {
-    log(`Using saved account ${account.accountId}.`);
-  }
-
-  activeAccount = account;
-  await startPolling(account);
+  log("WeChat MCP server is ready.");
 }
 
 main().catch((err) => {
