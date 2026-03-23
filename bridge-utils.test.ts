@@ -206,6 +206,16 @@ describe("formatThreadSwitchMessage", () => {
       }),
     ).toContain("restored shared thread");
   });
+
+  test("formats local session fallback notices", () => {
+    expect(
+      formatThreadSwitchMessage({
+        threadId: "thread_fallback_123456",
+        source: "local",
+        reason: "local_session_fallback",
+      }),
+    ).toContain("from the local terminal");
+  });
 });
 
 describe("formatResumeThreadList", () => {

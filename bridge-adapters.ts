@@ -100,12 +100,20 @@ type CodexSessionSummary = {
   filePath: string;
 };
 
+type CodexRecentSessionFile = {
+  threadId: string;
+  filePath: string;
+  modifiedAtMs: number;
+};
+
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
 const WINDOWS_DIRECT_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
 const WINDOWS_POWERSHELL_EXTENSION = ".ps1";
 const CODEX_SESSION_POLL_INTERVAL_MS = 500;
 const CODEX_SESSION_MATCH_WINDOW_MS = 30_000;
+const CODEX_SESSION_FALLBACK_SCAN_INTERVAL_MS = 5_000;
+const CODEX_THREAD_SIGNAL_TTL_MS = 30_000;
 const CODEX_RECENT_SESSION_KEY_LIMIT = 64;
 const INTERRUPT_SETTLE_DELAY_MS = 1_500;
 const CODEX_STARTUP_WARMUP_MS = 1_200;
@@ -113,6 +121,8 @@ const CODEX_APP_SERVER_HOST = "127.0.0.1";
 const CODEX_APP_SERVER_READY_TIMEOUT_MS = 10_000;
 const CODEX_APP_SERVER_LOG_LIMIT = 12_000;
 const CODEX_RPC_CONNECT_RETRY_MS = 150;
+const CODEX_RPC_RECONNECT_TIMEOUT_MS = 5_000;
+const CODEX_SESSION_LOCAL_MIRROR_FALLBACK_WINDOW_MS = 15_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -182,6 +192,14 @@ function normalizeCodexRpcError(error: unknown): string {
   }
 
   return describeUnknownError(error);
+}
+
+function isRecentIsoTimestamp(timestamp: string, maxAgeMs: number): boolean {
+  const parsedMs = Date.parse(timestamp);
+  if (!Number.isFinite(parsedMs)) {
+    return false;
+  }
+  return parsedMs >= Date.now() - maxAgeMs;
 }
 
 function coerceWebSocketMessageData(data: unknown): string | null {
@@ -309,6 +327,60 @@ export function extractCodexUserMessageText(item: unknown): string | null {
 
   const text = normalizeOutput(parts.join("\n")).trim();
   return text || null;
+}
+
+export function extractCodexThreadFollowIdFromStatusChanged(params: unknown): string | null {
+  if (!isRecord(params)) {
+    return null;
+  }
+
+  const threadId = getNotificationThreadId(params);
+  if (!threadId) {
+    return null;
+  }
+
+  const status = isRecord(params.status) ? params.status : null;
+  if (!status) {
+    return threadId;
+  }
+
+  const statusType = typeof status.type === "string" ? status.type : "";
+  if (statusType === "notLoaded") {
+    return null;
+  }
+
+  if (statusType === "active" || statusType === "idle" || statusType === "systemError") {
+    return threadId;
+  }
+
+  return threadId;
+}
+
+export function extractCodexThreadStartedThreadId(params: unknown): string | null {
+  if (!isRecord(params) || !isRecord(params.thread)) {
+    return null;
+  }
+
+  return typeof params.thread.id === "string" ? params.thread.id : null;
+}
+
+export function shouldIgnoreCodexSessionReplayEntry(
+  timestamp: unknown,
+  ignoreBeforeMs: number | null,
+): boolean {
+  if (ignoreBeforeMs === null) {
+    return false;
+  }
+  if (typeof timestamp !== "string") {
+    return true;
+  }
+
+  const parsedTimestampMs = Date.parse(timestamp);
+  if (!Number.isFinite(parsedTimestampMs)) {
+    return true;
+  }
+
+  return parsedTimestampMs < ignoreBeforeMs;
 }
 
 function getEnvValue(
@@ -939,6 +1011,47 @@ function findCodexSessionFile(
   });
 
   return candidates[0]?.filePath ?? null;
+}
+
+export function findRecentCodexSessionFileForCwd(
+  cwd: string,
+  startedAtMs: number,
+): CodexRecentSessionFile | null {
+  const sessionsRoot = buildCodexSessionsRoot();
+  if (!sessionsRoot) {
+    return null;
+  }
+
+  const currentCwd = normalizeComparablePath(cwd);
+  let bestCandidate: CodexRecentSessionFile | null = null;
+
+  for (const filePath of listCodexSessionFilesRecursively(sessionsRoot)) {
+    const meta = readCodexSessionMeta(filePath);
+    if (!meta?.id || !meta.cwd || normalizeComparablePath(meta.cwd) !== currentCwd) {
+      continue;
+    }
+
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(filePath);
+    } catch {
+      continue;
+    }
+
+    if (stats.mtimeMs < startedAtMs - CODEX_SESSION_MATCH_WINDOW_MS) {
+      continue;
+    }
+
+    if (!bestCandidate || stats.mtimeMs > bestCandidate.modifiedAtMs) {
+      bestCandidate = {
+        threadId: meta.id,
+        filePath,
+        modifiedAtMs: stats.mtimeMs,
+      };
+    }
+  }
+
+  return bestCandidate;
 }
 
 export function listCodexResumeThreads(
@@ -1639,11 +1752,13 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
   private appServerLog = "";
   private rpcSocket: WebSocket | null = null;
   private rpcShuttingDown = false;
+  private rpcReconnectPromise: Promise<boolean> | null = null;
   private rpcRequestCounter = 0;
   private pendingRpcRequests = new Map<string, CodexRpcPendingRequest>();
   private sharedThreadId: string | null = null;
   private activeTurn: CodexActiveTurn | null = null;
   private bridgeOwnedTurnIds = new Set<string>();
+  private recentBridgeThreadSignalAtById = new Map<string, number>();
   private pendingTurnStart = false;
   private pendingTurnThreadId: string | null = null;
   private interruptPendingTurnStart = false;
@@ -1666,6 +1781,8 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
   private sessionReadOffset = 0;
   private sessionPartialLine = "";
   private sessionFinalText: string | null = null;
+  private sessionIgnoreBeforeMs: number | null = null;
+  private nextSessionFallbackScanAtMs = 0;
   private completedTurnIds = new Set<string>();
   private completedTurnOrder: string[] = [];
   private pendingInjectedInputs: Array<{
@@ -2035,12 +2152,16 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
     this.sessionReadOffset = 0;
     this.sessionPartialLine = "";
     this.sessionFinalText = null;
+    this.sessionIgnoreBeforeMs = null;
+    this.nextSessionFallbackScanAtMs = 0;
   }
 
   private async pollSessionLog(): Promise<void> {
     if (!this.isCodexClientRunning()) {
       return;
     }
+
+    this.maybeApplyRecentSessionFallback();
 
     if (!this.sessionFilePath) {
       const startedAtMs = this.state.startedAt ? Date.parse(this.state.startedAt) : Date.now();
@@ -2084,6 +2205,52 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
     }
   }
 
+  private maybeApplyRecentSessionFallback(): void {
+    if (!this.isNativePanelMode()) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now < this.nextSessionFallbackScanAtMs) {
+      return;
+    }
+    this.nextSessionFallbackScanAtMs = now + CODEX_SESSION_FALLBACK_SCAN_INTERVAL_MS;
+
+    const startedAtMs = this.state.startedAt ? Date.parse(this.state.startedAt) : now;
+    const candidate = findRecentCodexSessionFileForCwd(this.options.cwd, startedAtMs);
+    if (!candidate) {
+      return;
+    }
+
+    let currentSessionModifiedAtMs = Number.NEGATIVE_INFINITY;
+    if (this.sessionFilePath) {
+      try {
+        currentSessionModifiedAtMs = fs.statSync(this.sessionFilePath).mtimeMs;
+      } catch {
+        currentSessionModifiedAtMs = Number.NEGATIVE_INFINITY;
+      }
+    }
+
+    if (candidate.threadId !== this.sharedThreadId) {
+      if (this.sessionFilePath && candidate.modifiedAtMs <= currentSessionModifiedAtMs) {
+        return;
+      }
+
+      this.updateSharedThread(candidate.threadId, {
+        source: "local",
+        reason: "local_session_fallback",
+        notify: true,
+      });
+    }
+
+    if (this.sessionFilePath !== candidate.filePath) {
+      this.sessionFilePath = candidate.filePath;
+      this.sessionReadOffset = 0;
+      this.sessionPartialLine = "";
+      this.sessionFinalText = null;
+    }
+  }
+
   private handleSessionLogLine(line: string): void {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -2101,8 +2268,15 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
+    if (shouldIgnoreCodexSessionReplayEntry(parsed.timestamp, this.sessionIgnoreBeforeMs)) {
+      return;
+    }
+
     const payload = parsed.payload;
     const timestamp = typeof parsed.timestamp === "string" ? parsed.timestamp : nowIso();
+    if (this.sessionIgnoreBeforeMs !== null) {
+      this.sessionIgnoreBeforeMs = null;
+    }
 
     switch (payload.type) {
       case "task_started": {
@@ -2136,8 +2310,32 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
         this.state.activeTurnOrigin = origin;
 
         if (origin === "local") {
+          const turnId = this.activeTurn?.turnId ?? this.state.activeTurnId ?? null;
+          if (turnId && !this.mirroredUserInputTurnIds.has(turnId)) {
+            this.mirroredUserInputTurnIds.add(turnId);
+            this.emit({
+              type: "mirrored_user_input",
+              text: message,
+              timestamp,
+              origin: "local",
+            });
+          }
+
           if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
             this.setStatus("busy", "Codex is busy with a local terminal turn.");
+          }
+
+          if (
+            !turnId &&
+            !this.isRpcSocketOpen() &&
+            isRecentIsoTimestamp(timestamp, CODEX_SESSION_LOCAL_MIRROR_FALLBACK_WINDOW_MS)
+          ) {
+            this.emit({
+              type: "mirrored_user_input",
+              text: message,
+              timestamp,
+              origin: "local",
+            });
           }
         }
         return;
@@ -2571,14 +2769,54 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
-    const details = this.describeAppServerLog();
-    this.emit({
-      type: "fatal_error",
-      message: `codex app-server websocket closed unexpectedly.${details}`,
-      timestamp: nowIso(),
-    });
+    void this.reconnectRpcClientAfterUnexpectedClose();
+  }
 
-    this.terminateCodexClient();
+  private async reconnectRpcClientAfterUnexpectedClose(): Promise<boolean> {
+    if (this.rpcReconnectPromise) {
+      return await this.rpcReconnectPromise;
+    }
+
+    this.rpcReconnectPromise = (async () => {
+      if (!this.appServer || !this.appServerPort) {
+        const details = this.describeAppServerLog();
+        this.emit({
+          type: "fatal_error",
+          message: `codex app-server websocket closed unexpectedly.${details}`,
+          timestamp: nowIso(),
+        });
+        this.terminateCodexClient();
+        return false;
+      }
+
+      const reconnectDeadline = Date.now() + CODEX_RPC_RECONNECT_TIMEOUT_MS;
+      let lastError = "Codex websocket connection closed.";
+
+      while (!this.shuttingDown && Date.now() < reconnectDeadline) {
+        try {
+          await this.connectRpcClient();
+          return true;
+        } catch (error) {
+          lastError = describeUnknownError(error);
+          await delay(CODEX_RPC_CONNECT_RETRY_MS);
+        }
+      }
+
+      const details = this.describeAppServerLog();
+      this.emit({
+        type: "fatal_error",
+        message: `codex app-server websocket closed unexpectedly and could not reconnect: ${lastError}.${details}`,
+        timestamp: nowIso(),
+      });
+      this.terminateCodexClient();
+      return false;
+    })();
+
+    try {
+      return await this.rpcReconnectPromise;
+    } finally {
+      this.rpcReconnectPromise = null;
+    }
   }
 
   private rejectPendingRpcRequests(message: string): void {
@@ -2642,6 +2880,7 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
       throw new Error("Codex did not return a thread id for the bridge session.");
     }
 
+    this.rememberBridgeOwnedThreadSignal(threadId);
     this.updateSharedThread(threadId);
     return threadId;
   }
@@ -2682,6 +2921,7 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
       throw new Error("Codex did not return a thread id while resuming the saved thread.");
     }
 
+    this.rememberBridgeOwnedThreadSignal(resumedThreadId);
     this.sessionFilePath = null;
     this.sessionReadOffset = 0;
     this.sessionPartialLine = "";
@@ -2785,7 +3025,9 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
     this.completedTurnIds.clear();
     this.completedTurnOrder = [];
     this.pendingInjectedInputs = [];
+    this.recentBridgeThreadSignalAtById.clear();
     this.sessionFinalText = null;
+    this.nextSessionFallbackScanAtMs = 0;
     this.state.activeTurnId = undefined;
     this.state.activeTurnOrigin = undefined;
     if (!options.preserveThread) {
@@ -2824,6 +3066,8 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
       this.sessionReadOffset = 0;
       this.sessionPartialLine = "";
       this.sessionFinalText = null;
+      this.sessionIgnoreBeforeMs = threadId ? Date.now() : null;
+      this.nextSessionFallbackScanAtMs = 0;
       this.emit({
         type: "status",
         status: this.state.status,
@@ -2847,6 +3091,28 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
     }
   }
 
+  private rememberBridgeOwnedThreadSignal(threadId: string): void {
+    const cutoff = Date.now() - CODEX_THREAD_SIGNAL_TTL_MS;
+    for (const [candidateThreadId, recordedAtMs] of this.recentBridgeThreadSignalAtById.entries()) {
+      if (recordedAtMs < cutoff) {
+        this.recentBridgeThreadSignalAtById.delete(candidateThreadId);
+      }
+    }
+    this.recentBridgeThreadSignalAtById.set(threadId, Date.now());
+  }
+
+  private isRecentlyBridgeOwnedThread(threadId: string): boolean {
+    const recordedAtMs = this.recentBridgeThreadSignalAtById.get(threadId);
+    if (!recordedAtMs) {
+      return false;
+    }
+    if (recordedAtMs < Date.now() - CODEX_THREAD_SIGNAL_TTL_MS) {
+      this.recentBridgeThreadSignalAtById.delete(threadId);
+      return false;
+    }
+    return true;
+  }
+
   private clearPendingApprovalState(): void {
     this.pendingApprovalRequest = null;
     this.pendingApproval = null;
@@ -2866,7 +3132,31 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
     return `${typeof requestId}:${String(requestId)}`;
   }
 
+  private isRpcSocketOpen(): boolean {
+    return Boolean(this.rpcSocket && this.rpcSocket.readyState === WebSocket.OPEN);
+  }
+
+  private async ensureRpcClientConnected(): Promise<void> {
+    if (this.isRpcSocketOpen()) {
+      return;
+    }
+
+    if (this.rpcReconnectPromise) {
+      const reconnected = await this.rpcReconnectPromise;
+      if (!reconnected || !this.isRpcSocketOpen()) {
+        throw new Error("Codex websocket is not connected.");
+      }
+      return;
+    }
+
+    await this.connectRpcClient();
+    if (!this.isRpcSocketOpen()) {
+      throw new Error("Codex websocket is not connected.");
+    }
+  }
+
   private async sendRpcRequest(method: string, params: unknown): Promise<unknown> {
+    await this.ensureRpcClientConnected();
     const socket = this.rpcSocket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error("Codex websocket is not connected.");
@@ -2969,6 +3259,11 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private handleRpcNotification(method: string, params: unknown): void {
     if (!isRecord(params)) {
+      return;
+    }
+
+    if (method === "thread/started") {
+      this.handleThreadStarted(params);
       return;
     }
 
@@ -3199,14 +3494,39 @@ class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private handleThreadStatusChanged(params: Record<string, unknown>): void {
-    const threadId = getNotificationThreadId(params);
+    const threadId = extractCodexThreadFollowIdFromStatusChanged(params);
     if (!threadId) {
       return;
     }
 
-    const status = isRecord(params.status) ? params.status : null;
-    if (!status || status.type !== "active") {
+    if (!this.activeTurn || this.activeTurn.threadId === threadId) {
+      this.updateSharedThread(threadId, {
+        source: "local",
+        reason: "local_follow",
+        notify: true,
+      });
+      this.pendingThreadFollowId = null;
       return;
+    }
+
+    this.pendingThreadFollowId = threadId;
+  }
+
+  private handleThreadStarted(params: Record<string, unknown>): void {
+    const threadId = extractCodexThreadStartedThreadId(params);
+    if (!threadId) {
+      return;
+    }
+
+    if (this.isRecentlyBridgeOwnedThread(threadId)) {
+      return;
+    }
+
+    const thread = isRecord(params.thread) ? params.thread : null;
+    if (thread && typeof thread.cwd === "string") {
+      if (normalizeComparablePath(thread.cwd) !== normalizeComparablePath(this.options.cwd)) {
+        return;
+      }
     }
 
     if (!this.activeTurn || this.activeTurn.threadId === threadId) {

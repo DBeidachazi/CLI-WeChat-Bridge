@@ -286,6 +286,7 @@ export function formatThreadSwitchMessage(params: {
 
   switch (params.reason) {
     case "local_follow":
+    case "local_session_fallback":
     case "local_turn":
       return `Codex thread switched to ${shortThreadId} from the local terminal.`;
     case "wechat_resume":

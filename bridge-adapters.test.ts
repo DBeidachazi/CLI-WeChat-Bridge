@@ -8,13 +8,19 @@ import {
   buildCodexCliArgs,
   buildCodexApprovalRequest,
   extractCodexFinalTextFromItem,
+  extractCodexThreadFollowIdFromStatusChanged,
+  extractCodexThreadStartedThreadId,
   extractCodexUserMessageText,
+  findRecentCodexSessionFileForCwd,
   listCodexResumeThreads,
   matchesCodexSessionMeta,
   resolveSpawnTarget,
+  shouldIgnoreCodexSessionReplayEntry,
 } from "./bridge-adapters.ts";
 
 const tempDirectories: string[] = [];
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 function makeTempDirectory(): string {
   const directory = fs.mkdtempSync(
@@ -35,6 +41,8 @@ function writeTextFile(filePath: string, content: string): void {
 }
 
 afterEach(() => {
+  process.env.HOME = originalHome;
+  process.env.USERPROFILE = originalUserProfile;
   while (tempDirectories.length > 0) {
     const directory = tempDirectories.pop();
     if (!directory) {
@@ -370,6 +378,124 @@ describe("buildCodexCliArgs", () => {
       "ws://127.0.0.1:8123",
       "--no-alt-screen",
     ]);
+  });
+});
+
+describe("extractCodexThreadFollowIdFromStatusChanged", () => {
+  test("accepts idle thread status notifications from the local panel", () => {
+    expect(
+      extractCodexThreadFollowIdFromStatusChanged({
+        threadId: "thread_idle_123",
+        status: {
+          type: "idle",
+        },
+      }),
+    ).toBe("thread_idle_123");
+  });
+
+  test("rejects notLoaded thread status notifications", () => {
+    expect(
+      extractCodexThreadFollowIdFromStatusChanged({
+        threadId: "thread_not_loaded",
+        status: {
+          type: "notLoaded",
+        },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("extractCodexThreadStartedThreadId", () => {
+  test("extracts the thread id from thread-started notifications", () => {
+    expect(
+      extractCodexThreadStartedThreadId({
+        thread: {
+          id: "thread_started_123",
+          cwd: "C:\\repo",
+          status: {
+            type: "idle",
+          },
+        },
+      }),
+    ).toBe("thread_started_123");
+  });
+
+  test("returns null when the thread payload is missing", () => {
+    expect(extractCodexThreadStartedThreadId({})).toBeNull();
+  });
+});
+
+describe("shouldIgnoreCodexSessionReplayEntry", () => {
+  test("skips historical entries before the thread-switch cutoff", () => {
+    const cutoff = Date.parse("2026-03-23T10:00:00.000Z");
+
+    expect(
+      shouldIgnoreCodexSessionReplayEntry("2026-03-23T09:59:59.000Z", cutoff),
+    ).toBe(true);
+  });
+
+  test("keeps entries written after the thread-switch cutoff", () => {
+    const cutoff = Date.parse("2026-03-23T10:00:00.000Z");
+
+    expect(
+      shouldIgnoreCodexSessionReplayEntry("2026-03-23T10:00:01.000Z", cutoff),
+    ).toBe(false);
+  });
+
+  test("treats missing timestamps as replay while the cutoff is active", () => {
+    const cutoff = Date.parse("2026-03-23T10:00:00.000Z");
+
+    expect(shouldIgnoreCodexSessionReplayEntry(undefined, cutoff)).toBe(true);
+    expect(shouldIgnoreCodexSessionReplayEntry(undefined, null)).toBe(false);
+  });
+});
+
+describe("findRecentCodexSessionFileForCwd", () => {
+  test("finds a recently updated historical thread for the current cwd", () => {
+    const homeDirectory = makeTempDirectory();
+    process.env.HOME = homeDirectory;
+    process.env.USERPROFILE = homeDirectory;
+
+    const cwd = "C:\\repo";
+    const sessionFilePath = path.join(
+      homeDirectory,
+      ".codex",
+      "sessions",
+      "2025",
+      "12",
+      "31",
+      "historical-thread.jsonl",
+    );
+    writeTextFile(
+      sessionFilePath,
+      [
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: "thread_historical_123",
+            cwd,
+            source: "cli",
+            timestamp: "2025-12-31T10:00:00.000Z",
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          payload: {
+            type: "user_message",
+            message: "Resume this old thread.",
+          },
+          timestamp: "2026-03-23T12:00:01.000Z",
+        }),
+      ].join("\n"),
+    );
+    const freshMtime = new Date("2026-03-23T12:00:05.000Z");
+    fs.utimesSync(sessionFilePath, freshMtime, freshMtime);
+
+    const recent = findRecentCodexSessionFileForCwd(cwd, Date.parse("2026-03-23T12:00:00.000Z"));
+
+    expect(recent).not.toBeNull();
+    expect(recent?.threadId).toBe("thread_historical_123");
+    expect(recent?.filePath).toBe(sessionFilePath);
   });
 });
 

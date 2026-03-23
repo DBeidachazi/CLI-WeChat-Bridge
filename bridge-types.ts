@@ -3,6 +3,7 @@ export type BridgeTurnOrigin = "wechat" | "local";
 export type BridgeThreadSwitchSource = BridgeTurnOrigin | "restore";
 export type BridgeThreadSwitchReason =
   | "local_follow"
+  | "local_session_fallback"
   | "local_turn"
   | "wechat_resume"
   | "startup_restore";
