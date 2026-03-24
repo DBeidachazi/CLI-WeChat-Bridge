@@ -3,10 +3,10 @@
 
 本项目用于桥接微信消息与本地运行的 [`Codex`](https://github.com/openai/codex)、[`Claude Code`](https://code.claude.com/docs/en/overview) 或持久化 `powershell.exe` 会话，并将本地输出、审批请求与运行状态同步回微信。
 
-当前实现以 `Codex` 工作流为中心展开，重点是保留本地原生终端体验，并在此基础上提供微信侧的远程输入、结果回流与状态同步能力。(Codex的体验接近原生。)
+当前实现以本地工作流为中心展开，重点是保留本地原生终端体验，并在此基础上提供微信侧的远程输入、结果回流与状态同步能力。
 
 > 当前支持状态说明  
-> - `codex`：当前优先支持的适配器，功能链路最完整，完成度最高（也许是目前最接近原生体验的项目）
+> - `codex`：目前功能链路较为完整，仍在持续补齐审批与会话一致性体验
 > - `claude code`：已接入双终端 companion 桥接；当前以 hooks + interactive PTY 为主线，仍在持续补齐审批与会话一致性体验
 > - `shell`：可用，适合持久化 PowerShell 会话桥接
 
@@ -16,13 +16,13 @@
 
 - 你的主工作流仍在本地终端中进行
 - 你希望继续使用原生 `codex` 或其他 CLI 工具，而不是迁移到网页或托管机器人
-- 你希望在离开电脑时，仍能通过微信向本地会话发送请求，并接收必要的输出、审批与状态同步
+- 你希望在离开电脑时，仍能通过微信向本地会话发送请求，并接收必要的输出、与状态同步 （注意审批，即显式的请求确认还未完善）
 
 当前项目并不试图把微信变成新的主工作界面。相反，它的定位是：
 
 - 本地 CLI 仍然是主工作界面
 - 微信是远程入口
-- 会话一致性、线程状态和审批流仍以本地会话为中心
+- 会话一致性、线程状态和审批流仍以**本地会话为中心**
 
 ## 快速开始
 
@@ -78,7 +78,6 @@ bun run setup
 
 ![alt text](src/image-0.png)
 
-
 默认凭据文件路径：
 
 ```text
@@ -91,7 +90,7 @@ bun run setup
 - `account.json.userId` 对应的微信账号即为唯一授权 owner
 - 只有该账号发送的消息会被 bridge 接受
 
-### 4. 启动 `codex` 模式（目前实现的核心）
+### 4. 启动 `codex` 模式
 
 假设你的项目目录是：
 
@@ -106,7 +105,7 @@ wechat-bridge-codex
 ```
 ![alt text](src/image-1.png)
 
-终端 B：（再新开一个窗口,运行以下命令，近乎原生的codex)
+终端 B：（再新开一个窗口,运行以下命令，近乎原生的codex，不过暂时没有实现远程请求确认，待完善)
 
 ```bash
 wechat-codex
@@ -127,21 +126,25 @@ wechat-codex
 
 如果你第一次使用本项目，建议优先从 `codex` 模式开始。当前仓库中，`codex` 是实现最完整、会话一致性与本地/远程衔接能力最完善的适配器路径。
 
-### 5. 启动其他模式（暂待完善）
+### 5. 启动 Claude Code （不走Channels）
 
-`claude`：
+与 Codex 类似的，
+
+终端 A：（这是用于监听和服务的，先打开这个）
 
 ```bash
-cd D:\work\my-project
 wechat-bridge-claude
 ```
 
-`shell`：
+终端 B：（再新开一个窗口,运行以下命令，近乎原生的claude code，不过暂时没有实现远程请求确认)
 
 ```bash
-cd D:\work\my-project
-wechat-bridge-shell
+wechat-claude
 ```
+
+![alt text](src/image-6.png)
+
+
 
 ## 适配器支持情况
 
@@ -151,33 +154,6 @@ wechat-bridge-shell
 | `claude` | 已接入，持续完善中 | 当前采用 `wechat-bridge-claude` + `wechat-claude` 的双终端 companion 模式；会话切换、最终回复与审批元数据已按 Claude session 语义同步，但整体成熟度仍低于 `codex` |
 | `shell` | 可用 | 持久 `powershell.exe` 会话；高风险命令支持审批 |
 
-### 关于 `codex`
-
-`codex` 是当前仓库完成度最高的适配器路径，也是当前文档与功能定义的中心。当前实现已经完整覆盖以下关键链路：
-
-- 保持本地可见 Codex 面板
-- 保持本地原生会话习惯
-- 让微信与本地活动线程持续同步
-- 保留本地线程权威并让微信跟随本地线程
-- 支持本地输入镜像、最终回复回传、审批转发与状态查询
-
-如果你的目标是评估这个仓库当前最成熟、最稳定的使用方式，应以 `codex` 模式为准。
-
-### 关于 `claude code`
-
-`claude code` 当前已经接入基础桥接能力，包括：
-
-- 微信到本地 `claude` 会话的输入转发
-- 本地输出回传
-- 基于文本模式的审批识别
-
-但它目前仍未达到 `codex` 的完成度。主要原因不是简单的工程排期，而是当前 **channels 链路与交互模型限制** 会直接影响以下能力：
-
-- 会话一致性
-- 本地与远程的上下文连续性
-- 本地交互与微信侧远程控制之间的衔接方式
-
-因此，当前 README 的主体说明、使用建议与行为定义都以 `codex` 为中心。
 
 ## 命令说明
 
@@ -226,16 +202,6 @@ wechat-bridge-shell --cmd pwsh.exe
 - `--cmd <executable>`：覆盖默认命令
 - `--profile <name-or-path>`：向适配器传入 profile
 
-### `wechat-codex` 参数
-
-```bash
-wechat-codex --cwd D:\work\my-project
-```
-
-支持参数：
-
-- `--cwd <path>`：显式连接该目录对应的 bridge endpoint
-
 ## 微信侧支持的指令
 
 | 指令 | 说明 |
@@ -244,58 +210,6 @@ wechat-codex --cwd D:\work\my-project
 | `/status` | 查看 bridge 当前状态 |
 | `/stop` | 中断当前任务 |
 | `/reset` | 重建当前本地会话 |
-| `/confirm <code>` | 通过审批 |
-| `/deny` | 拒绝审批 |
-| `/resume` | 在 `codex` 模式下禁用；请在本地 `wechat-codex` 中执行 |
-
-## `Codex` 模式说明
-
-### 双终端结构
-
-`codex` 模式采用双终端结构：
-
-- `wechat-bridge-codex` 负责微信通信、状态同步、审批处理和输出批处理
-- `wechat-codex` 负责本地可见 Codex 面板
-
-这种结构的目的是将微信桥接与本地可见面板分离，从而尽可能保留本地终端的原生交互。
-
-### 线程规则
-
-当前 `codex` 模式的线程规则非常明确：
-
-- 本地 `wechat-codex` 当前线程是唯一权威来源
-- 微信跟随本地线程
-- 微信不会主动切换 `codex` 线程
-- 微信 `/resume` 在 `codex` 模式下被禁用
-- 本地 `/resume` 后，微信自动跟随新的活动线程
-
-### 微信会同步什么
-
-微信侧会接收到：
-
-- 普通输出文本
-- 本地输入摘要，按 adapter 显示为 `Local Codex input` 或 `Local Claude input`
-- 最终回复
-- 审批请求
-- 线程切换提示
-- 必要错误信息
-
-微信侧不会接收到：
-
-- 原始 TUI 控制字符
-- Alt-screen 重绘内容
-- 大量界面刷新噪声
-- 冗余心跳信息
-
-### Codex 原生历史
-
-Codex 的正常会话历史仍由 Codex 自身维护，默认保存在：
-
-```text
-~/.codex/sessions
-```
-
-本项目不会替代 Codex 自己的历史机制，而是在当前工作区内跟随活动线程。
 
 ## 工作区模型
 
@@ -337,28 +251,6 @@ Codex 的正常会话历史仍由 Codex 自身维护，默认保存在：
 | --- | --- |
 | `WECHAT_ILINK_BASE_URL` | 覆盖默认 iLink API 地址 |
 | `CLAUDE_WECHAT_CHANNEL_DATA_DIR` | 覆盖默认数据目录 |
-
-## 安全与授权
-
-### 单 owner 模型
-
-- bridge 只接受 `account.json.userId` 对应微信账号的消息
-- 其他账号会被明确拒绝
-
-### 审批机制
-
-审批主要出现在以下场景：
-
-- CLI 需要 yes/no 或 confirm
-- `shell` 模式中的高风险命令需要确认
-
-微信审批方式：
-
-```text
-/confirm <code>
-/deny
-```
-
 
 ## 常见问题
 
@@ -412,8 +304,7 @@ npm link
 
 1. 先确认本地 `wechat-codex` 是否真的仍在执行任务
 2. 必要时使用 `/stop`
-3. 若状态仍不一致，可执行 `/reset`
-4. 检查：
+3. 检查：
 
 ```text
 ~/.claude/channels/wechat/bridge.log
@@ -424,13 +315,9 @@ npm link
 请优先确认：
 
 1. `wechat-bridge-codex` 与 `wechat-codex` 是否都已重启到同一版本
-2. 如果使用的是：
+2. 如果使用的是： `npm install -g .`
 
-```bash
-npm install -g .
-```
-
-则代码更新后需要重新执行：
+则在本地的代码更新后，需要重新执行：
 
 ```bash
 npm install -g .
@@ -438,12 +325,13 @@ npm install -g .
 
 ## 已知限制
 
-- 当前主要在 Windows 环境下验证
+- 当前主要在 Windows/Linux 环境下验证
 - `codex` 是当前优先支持的路径
-- `claude code` 当前已切到 companion + hooks 路径，但整体成熟度仍未达到 `codex`
+- `claude code` 当前已切到 companion + hooks 路径
 - `codex` 模式下微信 `/resume` 被禁用
 - 当前模型是单 owner、单 bridge、单活动工作区
-- 当前仍依赖 iLink / ClawBot 这一链路
+- 审批相关功能（即用户确认相关功能）,由于限制，暂时还未完善
+
 
 ## 开发说明
 
@@ -472,22 +360,6 @@ bun test
 - session log fallback
 - panel / busy / completion recovery
 - 工作区路径与状态隔离
-
-## 运行时说明
-
-在 Windows 上，交互式 [`node-pty`](https://github.com/microsoft/node-pty)、ConPTY 以及相关 CLI 进程管理在 [Node.js](https://nodejs.org/en/download) 下比 [Bun](https://bun.sh/docs/installation) 更稳定，尤其体现在：
-
-- `codex`
-- `claude`
-- 本地 PTY / ConPTY 管理
-
-因此当前策略是：
-
-- `setup` 与测试继续使用 Bun
-- 正式 bridge 运行时默认使用 Node.js
-- `bun run bridge:*` 仍然是仓库内开发入口
-
-如果你还没有安装运行时，请直接使用前文“相关链接”中的 Node.js 下载页和 Bun 安装文档。
 
 ## 致谢
 
