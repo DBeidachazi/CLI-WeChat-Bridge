@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_DIR = path.resolve(MODULE_DIR, "..", "..");
 
 export const DEFAULT_BASE_URL =
   process.env.WECHAT_ILINK_BASE_URL?.trim() || "https://ilinkai.weixin.qq.com";
@@ -36,7 +37,7 @@ export type WorkspaceChannelPaths = {
 };
 
 const LEGACY_CHANNEL_DATA_DIR = path.join(
-  MODULE_DIR,
+  PROJECT_DIR,
   "~",
   ".claude",
   "channels",

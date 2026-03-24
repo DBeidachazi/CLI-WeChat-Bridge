@@ -6,7 +6,7 @@ import {
   createBridgeAdapter,
   resolveDefaultAdapterCommand,
 } from "./bridge-adapters.ts";
-import { migrateLegacyChannelFiles } from "./channel-config.ts";
+import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 import { BridgeStateStore } from "./bridge-state.ts";
 import type {
   BridgeAdapter,
@@ -32,7 +32,7 @@ import {
   DEFAULT_LONG_POLL_TIMEOUT_MS,
   WeChatTransport,
   type InboundWechatMessage,
-} from "./wechat-transport.ts";
+} from "../wechat/wechat-transport.ts";
 
 type BridgeCliOptions = {
   adapter: BridgeAdapterKind;

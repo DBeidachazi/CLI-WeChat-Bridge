@@ -5,8 +5,12 @@ import type net from "node:net";
 import {
   ensureWorkspaceChannelDir,
   getWorkspaceChannelPaths,
-} from "./channel-config.ts";
-import type { BridgeAdapterKind, BridgeAdapterState, BridgeEvent } from "./bridge-types.ts";
+} from "../wechat/channel-config.ts";
+import type {
+  BridgeAdapterKind,
+  BridgeAdapterState,
+  BridgeEvent,
+} from "../bridge/bridge-types.ts";
 
 export type LocalCompanionCommand =
   | { command: "send_input"; text: string }

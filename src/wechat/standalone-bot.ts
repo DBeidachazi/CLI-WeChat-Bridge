@@ -6,7 +6,7 @@
  * bypassing the MCP channel protocol.
  *
  * Usage:
- *   bun run standalone-bot.ts
+ *   bun run src/wechat/standalone-bot.ts
  */
 
 import fs from "node:fs";
@@ -456,7 +456,7 @@ async function main() {
   log(`正在加载微信凭据: ${CREDENTIALS_FILE}`);
   const account = loadCredentials();
   if (!account) {
-    logError("无法加载微信凭据，请先运行: bun run setup.ts");
+  logError("无法加载微信凭据，请先运行: bun run setup");
     process.exit(1);
   }
   log(`✓ 微信账号: ${account.accountId}`);

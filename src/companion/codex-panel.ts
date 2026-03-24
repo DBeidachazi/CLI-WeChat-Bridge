@@ -3,26 +3,24 @@
 import net from "node:net";
 import path from "node:path";
 
-import { createBridgeAdapter } from "./bridge-adapters.ts";
+import { createBridgeAdapter } from "../bridge/bridge-adapters.ts";
 import {
-  attachLocalCompanionMessageListener,
-  readLocalCompanionEndpoint,
-  sendLocalCompanionMessage,
-  type LocalCompanionMessage,
-} from "./local-companion-link.ts";
-import { migrateLegacyChannelFiles } from "./channel-config.ts";
+  attachCodexPanelMessageListener,
+  readCodexPanelEndpoint,
+  sendCodexPanelMessage,
+  type CodexPanelMessage,
+} from "./codex-panel-link.ts";
+import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 
-function log(adapter: string, message: string): void {
-  process.stderr.write(`[${adapter}-companion] ${message}\n`);
+function log(message: string): void {
+  process.stderr.write(`[codex-panel] ${message}\n`);
 }
 
-type LocalCompanionCliOptions = {
-  adapter: "codex" | "claude";
+type CodexPanelCliOptions = {
   cwd: string;
 };
 
-function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
-  let adapter: "codex" | "claude" | null = null;
+function parseCliArgs(argv: string[]): CodexPanelCliOptions {
   let cwd = process.cwd();
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -32,22 +30,13 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
     if (arg === "--help" || arg === "-h") {
       process.stdout.write(
         [
-          "Usage: local-companion --adapter <codex|claude> [--cwd <path>]",
+          "Usage: wechat-codex [--cwd <path>]",
           "",
-          'Starts the visible local companion and connects it to the matching running bridge for the current directory.',
+          'Starts the visible Codex panel and connects it to the running "wechat-bridge-codex" instance for the current directory.',
           "",
         ].join("\n"),
       );
       process.exit(0);
-    }
-
-    if (arg === "--adapter") {
-      if (!next || !["codex", "claude"].includes(next)) {
-        throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
-      }
-      adapter = next as "codex" | "claude";
-      i += 1;
-      continue;
     }
 
     if (arg === "--cwd") {
@@ -62,21 +51,17 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
     throw new Error(`Unknown argument: ${arg}`);
   }
 
-  if (!adapter) {
-    throw new Error("Missing required --adapter <codex|claude>");
-  }
-
-  return { adapter, cwd };
+  return { cwd };
 }
 
 async function main(): Promise<void> {
-  migrateLegacyChannelFiles((message) => log("local", message));
+  migrateLegacyChannelFiles(log);
   const options = parseCliArgs(process.argv.slice(2));
 
-  const endpoint = readLocalCompanionEndpoint(options.cwd);
-  if (!endpoint || endpoint.kind !== options.adapter) {
+  const endpoint = readCodexPanelEndpoint(options.cwd);
+  if (!endpoint) {
     throw new Error(
-      `No active ${options.adapter} bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-${options.adapter}" in that directory first.`,
+      `No active Codex bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-codex" in that directory first.`,
     );
   }
 
@@ -93,14 +78,12 @@ async function main(): Promise<void> {
   socket.setNoDelay(true);
 
   const adapter = createBridgeAdapter({
-    kind: endpoint.kind,
+    kind: "codex",
     command: endpoint.command,
     cwd: endpoint.cwd,
     profile: endpoint.profile,
-    initialSharedSessionId: endpoint.sharedSessionId ?? endpoint.sharedThreadId,
-    initialResumeConversationId: endpoint.resumeConversationId,
-    initialTranscriptPath: endpoint.transcriptPath,
-    renderMode: endpoint.kind === "codex" ? "panel" : "companion",
+    initialSharedThreadId: endpoint.sharedThreadId,
+    renderMode: "panel",
   });
 
   let shuttingDown = false;
@@ -108,14 +91,14 @@ async function main(): Promise<void> {
   let detachListener: (() => void) | null = null;
 
   const publishState = () => {
-    sendLocalCompanionMessage(socket, {
+    sendCodexPanelMessage(socket, {
       type: "state",
       state: adapter.getState(),
     });
   };
 
   const sendResponse = (id: string, ok: boolean, result?: unknown, error?: string) => {
-    sendLocalCompanionMessage(socket, {
+    sendCodexPanelMessage(socket, {
       type: "response",
       id,
       ok,
@@ -124,7 +107,7 @@ async function main(): Promise<void> {
     });
   };
 
-  const closeCompanion = async (exitCode = 0) => {
+  const closePanel = async (exitCode = 0) => {
     if (shuttingDown) {
       return;
     }
@@ -147,14 +130,14 @@ async function main(): Promise<void> {
   };
 
   adapter.setEventSink((event) => {
-    sendLocalCompanionMessage(socket, {
+    sendCodexPanelMessage(socket, {
       type: "event",
       event,
     });
     publishState();
   });
 
-  detachListener = attachLocalCompanionMessageListener(socket, (message: LocalCompanionMessage) => {
+  detachListener = attachCodexPanelMessageListener(socket, (message: CodexPanelMessage) => {
     if (!helloAcknowledged) {
       if (message.type === "hello_ack") {
         helloAcknowledged = true;
@@ -208,7 +191,7 @@ async function main(): Promise<void> {
             break;
           case "dispose":
             sendResponse(message.id, true);
-            await closeCompanion(0);
+            await closePanel(0);
             break;
         }
       } catch (error) {
@@ -219,24 +202,24 @@ async function main(): Promise<void> {
   });
 
   socket.once("close", () => {
-    void closeCompanion(0);
+    void closePanel(0);
   });
   socket.once("error", () => {
-    void closeCompanion(1);
+    void closePanel(1);
   });
 
-  sendLocalCompanionMessage(socket, {
+  sendCodexPanelMessage(socket, {
     type: "hello",
     token: endpoint.token,
-    companionPid: process.pid,
+    panelPid: process.pid,
   });
 
   await adapter.start();
   publishState();
-  log(options.adapter, `Connected to bridge ${endpoint.instanceId}.`);
+  log(`Connected to bridge ${endpoint.instanceId}.`);
 }
 
 main().catch((error) => {
-  log("local", error instanceof Error ? error.message : String(error));
+  log(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

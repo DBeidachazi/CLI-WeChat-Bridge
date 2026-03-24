@@ -3,7 +3,7 @@
  * WeChat channel setup.
  *
  * Run this before starting the channel server:
- *   bun setup.ts
+ *   bun run setup
  */
 
 import fs from "node:fs";

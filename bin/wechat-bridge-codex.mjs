@@ -2,4 +2,4 @@
 
 import { runTsEntry } from "./_run-entry.mjs";
 
-runTsEntry("wechat-bridge.ts", ["--adapter", "codex"]);
+runTsEntry("src/bridge/wechat-bridge.ts", ["--adapter", "codex"]);

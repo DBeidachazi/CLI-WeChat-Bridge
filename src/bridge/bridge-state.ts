@@ -6,7 +6,7 @@ import {
   BRIDGE_STATE_FILE,
   ensureWorkspaceChannelDir,
   ensureChannelDataDir,
-} from "./channel-config.ts";
+} from "../wechat/channel-config.ts";
 import type {
   BridgeAdapterKind,
   BridgeState,

@@ -76,7 +76,7 @@ bun run setup
 3. 等待你在微信中扫码并确认
 4. 将 bot 凭据写入本地数据目录
 
-![alt text](src/image-0.png)
+![alt text](docs/images/image-0.png)
 
 默认凭据文件路径：
 
@@ -103,7 +103,7 @@ cd D:\work\your-project
 ```bash
 wechat-bridge-codex
 ```
-![alt text](src/image-1.png)
+![alt text](docs/images/image-1.png)
 
 终端 B：（再新开一个窗口,运行以下命令，近乎原生的codex，不过暂时没有实现远程请求确认，待完善)
 
@@ -111,7 +111,7 @@ wechat-bridge-codex
 wechat-codex
 ```
 
-![alt text](src/image-2.png)
+![alt text](docs/images/image-2.png)
 
 然后即可：（允许双向交互！windows 和 linux 均实测成功）
 
@@ -120,9 +120,9 @@ wechat-codex
 - 在本地执行 `/resume` 切线程
 - 让微信自动跟随当前本地线程
 
-![alt text](src/image-3.png)
+![alt text](docs/images/image-3.png)
 
-![alt text](src/image-4.png)
+![alt text](docs/images/image-4.png)
 
 如果你第一次使用本项目，建议优先从 `codex` 模式开始。当前仓库中，`codex` 是实现最完整、会话一致性与本地/远程衔接能力最完善的适配器路径。
 
@@ -142,7 +142,7 @@ wechat-bridge-claude
 wechat-claude
 ```
 
-![alt text](src/image-6.png)
+![alt text](docs/images/image-6.png)
 
 
 
@@ -339,13 +339,14 @@ npm install -g .
 
 | 文件 | 作用 |
 | --- | --- |
-| `wechat-bridge.ts` | bridge 主事件循环 |
-| `bridge-adapters.ts` | `codex` / `claude` / `shell` 适配器实现 |
-| `codex-panel.ts` | `wechat-codex` 启动入口 |
-| `codex-panel-link.ts` | bridge 与 Codex panel 的本地 IPC |
-| `wechat-transport.ts` | iLink 消息收发 |
-| `bridge-state.ts` | bridge 状态、锁与日志 |
-| `setup.ts` | 登录与凭据初始化 |
+| `src/bridge/wechat-bridge.ts` | bridge 主事件循环 |
+| `src/bridge/bridge-adapters.ts` | `codex` / `claude` / `shell` 适配器实现 |
+| `src/companion/local-companion.ts` | `wechat-codex` / `wechat-claude` 本地 companion 入口 |
+| `src/companion/codex-panel.ts` | Codex panel 入口（备用） |
+| `src/companion/codex-panel-link.ts` | bridge 与 Codex panel 的本地 IPC |
+| `src/wechat/wechat-transport.ts` | iLink 消息收发 |
+| `src/bridge/bridge-state.ts` | bridge 状态、锁与日志 |
+| `src/wechat/setup.ts` | 登录与凭据初始化 |
 
 ### 测试
 
