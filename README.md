@@ -136,16 +136,15 @@ wechat-codex
 wechat-bridge-claude
 ```
 
-终端 B：（再新开一个窗口,运行以下命令，近乎原生的claude code，不过暂时没有实现远程请求确认)
+终端 B：（再新开一个窗口,运行以下命令，近乎原生的claude code，并且支持通过微信完成远程审批确认）
 
 ```bash
 wechat-claude
 ```
 
-![alt text](docs/images/image-6.png)
+![Claude Windows](docs/images/image-6.png)
 
-
-![alt text](docs/images/image-7.png)
+![Claude Linux](docs/images/image-7.png)
 
 ## 适配器支持情况
 
@@ -331,7 +330,7 @@ npm install -g .
 - `claude code` 当前已切到 companion + hooks 路径
 - `codex` 模式下微信 `/resume` 被禁用
 - 当前模型是单 owner、单 bridge、单活动工作区
-- 审批相关功能（即用户确认相关功能）,由于限制，暂时还未完善
+- `claude code` 远程审批链路现已可用；微信侧可直接确认或拒绝 Claude 的权限请求
 
 
 ## 开发说明

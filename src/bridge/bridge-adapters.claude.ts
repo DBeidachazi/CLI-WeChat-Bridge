@@ -5,6 +5,7 @@ import { buildLocalCompanionToken } from "../companion/local-companion-link.ts";
 import { ensureWorkspaceChannelDir } from "../wechat/channel-config.ts";
 import {
   buildClaudeFailureMessage,
+  buildClaudeHookScript,
   buildClaudeHookSettings,
   buildClaudePermissionDecisionHookOutput,
   buildClaudePermissionApprovalRequest,
@@ -35,7 +36,6 @@ type AdapterOptions = shared.AdapterOptions;
 type ClaudePendingHookApproval = shared.ClaudePendingHookApproval;
 
 const {
-  CLAUDE_HOOK_APPROVAL_TIMEOUT_MS,
   CLAUDE_HOOK_LISTEN_HOST,
   CLAUDE_WECHAT_WORKING_NOTICE_DELAY_MS,
   MODULE_DIR,
@@ -342,8 +342,8 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
         const cleanupPendingRequestsForSocket = () => {
           for (const [requestId, pending] of this.pendingHookApprovals.entries()) {
             if (pending.socket === socket) {
-              clearTimeout(pending.timer);
               this.pendingHookApprovals.delete(requestId);
+              this.handleClosedClaudeHookApproval(requestId);
             }
           }
         };
@@ -406,31 +406,18 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     const settingsFilePath = path.join(runtimeDir, "settings.json");
     const hookEntryPath = path.join(MODULE_DIR, "claude-hook.ts");
 
-    if (process.platform === "win32") {
-      fs.writeFileSync(
-        hookScriptPath,
-        [
-          "@echo off",
-          "setlocal",
-          `set "CLAUDE_WECHAT_HOOK_PORT=${this.hookPort}"`,
-          `set "CLAUDE_WECHAT_HOOK_TOKEN=${this.hookToken}"`,
-          `${quoteWindowsCommandArg(process.execPath)} --no-warnings --experimental-strip-types ${quoteWindowsCommandArg(hookEntryPath)} >nul 2>nul`,
-          "exit /b 0",
-        ].join("\r\n"),
-        "utf8",
-      );
-    } else {
-      fs.writeFileSync(
-        hookScriptPath,
-        [
-          "#!/bin/sh",
-          `export CLAUDE_WECHAT_HOOK_PORT=${quotePosixCommandArg(String(this.hookPort))}`,
-          `export CLAUDE_WECHAT_HOOK_TOKEN=${quotePosixCommandArg(this.hookToken)}`,
-          `${quotePosixCommandArg(process.execPath)} --no-warnings --experimental-strip-types ${quotePosixCommandArg(hookEntryPath)} >/dev/null 2>&1 || true`,
-          "exit 0",
-        ].join("\n"),
-        "utf8",
-      );
+    fs.writeFileSync(
+      hookScriptPath,
+      buildClaudeHookScript({
+        platform: process.platform,
+        runtimeExecPath: process.execPath,
+        hookEntryPath,
+        hookPort: this.hookPort,
+        hookToken: this.hookToken,
+      }),
+      "utf8",
+    );
+    if (process.platform !== "win32") {
       fs.chmodSync(hookScriptPath, 0o755);
     }
 
@@ -723,15 +710,9 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   ): void {
     this.clearWechatWorkingNotice();
     this.flushPendingClaudeHookApprovals();
-    const timer = setTimeout(() => {
-      this.respondToClaudeHook(socket, requestId);
-      this.pendingHookApprovals.delete(requestId);
-    }, CLAUDE_HOOK_APPROVAL_TIMEOUT_MS);
-    timer.unref?.();
     this.pendingHookApprovals.set(requestId, {
       requestId,
       socket,
-      timer,
     });
     const request = buildClaudePermissionApprovalRequest(payload);
     this.pendingApproval = {
@@ -750,6 +731,32 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       request: this.pendingApproval,
       timestamp: nowIso(),
     });
+  }
+
+  private handleClosedClaudeHookApproval(requestId: string): void {
+    if (this.pendingApproval?.requestId !== requestId) {
+      return;
+    }
+
+    if (this.pendingApproval.confirmInput || this.pendingApproval.denyInput) {
+      this.pendingApproval = {
+        ...this.pendingApproval,
+        requestId: undefined,
+      };
+      this.state.pendingApproval = this.pendingApproval;
+      return;
+    }
+
+    this.pendingApproval = null;
+    this.state.pendingApproval = null;
+    this.state.pendingApprovalOrigin = undefined;
+    if (this.state.status === "awaiting_approval") {
+      this.setStatus("awaiting_approval", "Claude approval must be resolved in the local terminal.");
+    }
+    this.emitClaudeNotice(
+      "Claude approval can no longer be resolved from WeChat. Approve it in the local Claude terminal.",
+      "warning",
+    );
   }
 
   private handleClaudeStop(payload: { last_assistant_message?: string }): void {
@@ -822,7 +829,6 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       return false;
     }
 
-    clearTimeout(pending.timer);
     this.pendingHookApprovals.delete(requestId);
     this.respondToClaudeHook(
       pending.socket,
@@ -838,7 +844,6 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       return;
     }
 
-    clearTimeout(pending.timer);
     this.respondToClaudeHook(pending.socket, requestId);
     this.pendingHookApprovals.delete(requestId);
   }

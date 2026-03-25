@@ -26,6 +26,9 @@ export type ApprovalRequest = {
   source: ApprovalSource;
   summary: string;
   commandPreview: string;
+  toolName?: string;
+  detailLabel?: string;
+  detailPreview?: string;
   requestId?: string;
   confirmInput?: string;
   denyInput?: string;

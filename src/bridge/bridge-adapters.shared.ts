@@ -128,7 +128,6 @@ export type CodexRecentSessionFile = {
 export type ClaudePendingHookApproval = {
   requestId: string;
   socket: net.Socket;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 export const DEFAULT_COLS = 120;
@@ -152,7 +151,6 @@ export const CODEX_RPC_RECONNECT_TIMEOUT_MS = 5_000;
 export const CODEX_SESSION_LOCAL_MIRROR_FALLBACK_WINDOW_MS = 15_000;
 export const CLAUDE_HOOK_LISTEN_HOST = "127.0.0.1";
 export const CLAUDE_HELP_PROBE_TIMEOUT_MS = 5_000;
-export const CLAUDE_HOOK_APPROVAL_TIMEOUT_MS = 15_000;
 export const CLAUDE_WECHAT_WORKING_NOTICE_DELAY_MS = 12_000;
 export const DEFAULT_UNIX_SHELL_CANDIDATES = ["pwsh", "bash", "zsh", "sh"] as const;
 export const POSIX_SHELL_NAMES = new Set(["bash", "zsh", "sh", "dash", "ksh"]);

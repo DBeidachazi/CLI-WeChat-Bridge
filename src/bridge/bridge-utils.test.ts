@@ -4,8 +4,10 @@ import type { BridgeAdapterState, BridgeState } from "./bridge-types.ts";
 import {
   buildOneTimeCode,
   detectCliApproval,
+  formatApprovalMessage,
   formatFinalReplyMessage,
   formatMirroredUserInputMessage,
+  formatPendingApprovalReminder,
   formatResumeSessionList,
   formatResumeThreadList,
   formatStatusReport,
@@ -16,6 +18,7 @@ import {
   OutputBatcher,
   parseCodexSessionAgentMessage,
   parseSystemCommand,
+  parseWechatControlCommand,
   shouldDropStartupBacklogMessage,
 } from "./bridge-utils.ts";
 
@@ -36,6 +39,62 @@ describe("parseSystemCommand", () => {
   test("returns null for unsupported input", () => {
     expect(parseSystemCommand("hello")).toBeNull();
     expect(parseSystemCommand("/unknown foo")).toBeNull();
+  });
+});
+
+describe("parseWechatControlCommand", () => {
+  test("adds Claude-only approval shortcuts while keeping slash commands intact", () => {
+    expect(
+      parseWechatControlCommand("confirm", {
+        adapter: "claude",
+        hasPendingConfirmation: true,
+      }),
+    ).toEqual({ type: "confirm" });
+    expect(
+      parseWechatControlCommand("yes", {
+        adapter: "claude",
+        hasPendingConfirmation: true,
+      }),
+    ).toEqual({ type: "confirm" });
+    expect(
+      parseWechatControlCommand("deny", {
+        adapter: "claude",
+        hasPendingConfirmation: true,
+      }),
+    ).toEqual({ type: "deny" });
+    expect(
+      parseWechatControlCommand("no", {
+        adapter: "claude",
+        hasPendingConfirmation: true,
+      }),
+    ).toEqual({ type: "deny" });
+    expect(
+      parseWechatControlCommand("/confirm", {
+        adapter: "claude",
+        hasPendingConfirmation: false,
+      }),
+    ).toEqual({ type: "confirm" });
+    expect(
+      parseWechatControlCommand("/confirm LEGACY", {
+        adapter: "claude",
+        hasPendingConfirmation: true,
+      }),
+    ).toEqual({ type: "confirm", code: "LEGACY" });
+  });
+
+  test("does not reinterpret bare approval words outside Claude pending approvals", () => {
+    expect(
+      parseWechatControlCommand("yes", {
+        adapter: "claude",
+        hasPendingConfirmation: false,
+      }),
+    ).toBeNull();
+    expect(
+      parseWechatControlCommand("confirm", {
+        adapter: "codex",
+        hasPendingConfirmation: true,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -284,5 +343,49 @@ describe("adapter-aware message formatting", () => {
   test("formats final reply and failure messages by adapter", () => {
     expect(formatFinalReplyMessage("claude", "Done")).toBe("Done");
     expect(formatTaskFailedMessage("claude", "Boom")).toBe("Claude task failed:\nBoom");
+  });
+
+  test("formats Claude approval prompts without a required code", () => {
+    const pending = {
+      source: "cli" as const,
+      summary: "Claude permission is required for Bash.",
+      commandPreview: "Bash: npm test",
+      toolName: "Bash",
+      detailLabel: "command",
+      detailPreview: "npm test",
+      code: "ABC123",
+      createdAt: "2026-03-24T09:00:00.000Z",
+    };
+    const claudeAdapterState: BridgeAdapterState = {
+      kind: "claude",
+      status: "awaiting_approval",
+      cwd: "C:\\repo",
+      command: "claude",
+      pendingApproval: pending,
+    };
+    const codexAdapterState: BridgeAdapterState = {
+      kind: "codex",
+      status: "awaiting_approval",
+      cwd: "C:\\repo",
+      command: "codex",
+      pendingApproval: pending,
+    };
+
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
+      "Claude permission request.",
+    );
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain("tool: Bash");
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain("command: npm test");
+    expect(formatApprovalMessage(pending, claudeAdapterState)).not.toContain("code:");
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
+      "/confirm, confirm, or yes",
+    );
+    expect(formatPendingApprovalReminder(pending, claudeAdapterState)).toContain(
+      "Bash (npm test)",
+    );
+    expect(formatApprovalMessage(pending, codexAdapterState)).toContain("code: ABC123");
+    expect(formatPendingApprovalReminder(pending, codexAdapterState)).toContain(
+      "/confirm ABC123",
+    );
   });
 });

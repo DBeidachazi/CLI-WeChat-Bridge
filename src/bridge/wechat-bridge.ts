@@ -16,6 +16,7 @@ import type {
 import {
   buildOneTimeCode,
   formatApprovalMessage,
+  formatPendingApprovalReminder,
   formatDuration,
   formatFinalReplyMessage,
   formatMirroredUserInputMessage,
@@ -25,7 +26,7 @@ import {
   MESSAGE_START_GRACE_MS,
   nowIso,
   OutputBatcher,
-  parseSystemCommand,
+  parseWechatControlCommand,
   truncatePreview,
 } from "./bridge-utils.ts";
 import {
@@ -363,6 +364,11 @@ function wireAdapterEvents(params: {
 
   adapter.setEventSink((event) => {
     syncSharedSessionState();
+    const adapterState = adapter.getState();
+    const bridgeState = stateStore.getState();
+    if (bridgeState.pendingConfirmation && !adapterState.pendingApproval) {
+      stateStore.clearPendingConfirmation();
+    }
     const authorizedUserId = stateStore.getState().authorizedUserId;
 
     switch (event.type) {
@@ -405,7 +411,7 @@ function wireAdapterEvents(params: {
           );
           await queueWechatMessage(
             authorizedUserId,
-            formatApprovalMessage(pending, adapter.getState()),
+            formatApprovalMessage(pending, adapterState),
           );
         });
         break;
@@ -516,7 +522,10 @@ async function handleInboundMessage(params: {
 }): Promise<ActiveTask | null> {
   const { message, options, stateStore, adapter, queueWechatMessage, outputBatcher } = params;
   const state = stateStore.getState();
-  const systemCommand = parseSystemCommand(message.text);
+  const systemCommand = parseWechatControlCommand(message.text, {
+    adapter: options.adapter,
+    hasPendingConfirmation: Boolean(state.pendingConfirmation),
+  });
 
   if (message.senderId !== state.authorizedUserId) {
     await queueWechatMessage(
@@ -580,7 +589,7 @@ async function handleInboundMessage(params: {
         await queueWechatMessage(message.senderId, "No pending approval request.");
         return null;
       }
-      if (pending.code !== systemCommand.code) {
+      if (options.adapter !== "claude" && pending.code !== systemCommand.code) {
         await queueWechatMessage(message.senderId, "Confirmation code did not match.");
         return null;
       }
@@ -624,7 +633,7 @@ async function handleInboundMessage(params: {
   if (state.pendingConfirmation) {
     await queueWechatMessage(
       message.senderId,
-      `Approval is pending for ${state.pendingConfirmation.commandPreview}. Reply with /confirm ${state.pendingConfirmation.code} or /deny.`,
+      formatPendingApprovalReminder(state.pendingConfirmation, adapter.getState()),
     );
     return null;
   }

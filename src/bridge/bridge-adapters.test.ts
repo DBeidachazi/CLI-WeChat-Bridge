@@ -642,6 +642,98 @@ describe("Claude CLI compatibility", () => {
     adapter.flushPendingClaudeHookApprovals();
   });
 
+  test("keeps structured Claude approvals actionable until they are resolved", async () => {
+    const adapter = createBridgeAdapter({
+      kind: "claude",
+      command: "claude",
+      cwd: process.cwd(),
+      renderMode: "companion",
+    }) as any;
+    const socketPayloads: string[] = [];
+    adapter.setEventSink(() => undefined);
+    adapter.renderLocalOutput = () => undefined;
+    adapter.hasAcceptedInput = true;
+    adapter.state.status = "busy";
+    adapter.state.activeTurnOrigin = "wechat";
+
+    adapter.handleClaudePermissionRequest(
+      "request-persist",
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "npm test",
+        },
+      },
+      {
+        end(payload: string) {
+          socketPayloads.push(payload);
+        },
+        destroy() {},
+      } as any,
+    );
+
+    await wait(25);
+    const resolved = await adapter.resolveApproval("confirm");
+
+    expect(resolved).toBe(true);
+    expect(socketPayloads).toHaveLength(1);
+    const response = JSON.parse(socketPayloads[0].trim()) as {
+      requestId: string;
+      stdout: string;
+    };
+    expect(response.requestId).toBe("request-persist");
+    expect(JSON.parse(response.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "allow",
+        },
+      },
+    });
+  });
+
+  test("clears stale Claude remote approvals when the hook request is lost without a terminal fallback", () => {
+    const adapter = createBridgeAdapter({
+      kind: "claude",
+      command: "claude",
+      cwd: process.cwd(),
+      renderMode: "companion",
+    }) as any;
+    const events: Array<{ type: string; text?: string; level?: string }> = [];
+    adapter.setEventSink((event: { type: string; text?: string; level?: string }) =>
+      events.push(event),
+    );
+    adapter.renderLocalOutput = () => undefined;
+    adapter.hasAcceptedInput = true;
+    adapter.state.status = "busy";
+    adapter.state.activeTurnOrigin = "wechat";
+
+    adapter.handleClaudePermissionRequest(
+      "request-lost",
+      {
+        tool_name: "WebFetch",
+        tool_input: {
+          url: "https://example.com",
+        },
+      },
+      {
+        end() {},
+        destroy() {},
+      } as any,
+    );
+
+    adapter.handleClosedClaudeHookApproval("request-lost");
+
+    expect(adapter.pendingApproval).toBeNull();
+    expect(adapter.getState().pendingApproval).toBeNull();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "notice",
+        level: "warning",
+      }),
+    );
+  });
+
   test("emits a single notice for long-running Claude WeChat turns", async () => {
     const adapter = createBridgeAdapter({
       kind: "claude",

@@ -21,7 +21,7 @@ export type SystemCommand =
   | { type: "resume"; target?: string }
   | { type: "stop" }
   | { type: "reset" }
-  | { type: "confirm"; code: string }
+  | { type: "confirm"; code?: string }
   | { type: "deny" };
 
 export const MESSAGE_START_GRACE_MS = 5_000;
@@ -103,6 +103,47 @@ export function parseSystemCommand(text: string): SystemCommand | null {
     case "/confirm":
       return argument ? { type: "confirm", code: argument } : null;
     case "/deny":
+      return { type: "deny" };
+    default:
+      return null;
+  }
+}
+
+export function parseWechatControlCommand(
+  text: string,
+  options: {
+    adapter: BridgeAdapterKind;
+    hasPendingConfirmation: boolean;
+  },
+): SystemCommand | null {
+  const systemCommand = parseSystemCommand(text);
+  if (systemCommand) {
+    return systemCommand;
+  }
+
+  if (options.adapter !== "claude") {
+    return null;
+  }
+
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "/confirm") {
+    return { type: "confirm" };
+  }
+
+  if (!options.hasPendingConfirmation) {
+    return null;
+  }
+
+  switch (normalized) {
+    case "confirm":
+    case "yes":
+      return { type: "confirm" };
+    case "deny":
+    case "no":
       return { type: "deny" };
     default:
       return null;
@@ -426,6 +467,21 @@ export function formatApprovalMessage(
   pending: PendingApproval,
   adapterState: BridgeAdapterState,
 ): string {
+  const isClaude = adapterState.kind === "claude";
+  if (isClaude) {
+    return [
+      "Claude permission request.",
+      ...(pending.toolName ? [`tool: ${pending.toolName}`] : []),
+      ...(pending.detailPreview
+        ? [`${pending.detailLabel ?? "details"}: ${pending.detailPreview}`]
+        : pending.commandPreview
+          ? [`details: ${pending.commandPreview}`]
+          : []),
+      "Reply with /confirm, confirm, or yes to continue.",
+      "Reply with /deny, deny, or no to reject.",
+    ].join("\n");
+  }
+
   return [
     `${pending.source === "shell" ? "Shell" : "CLI"} approval is required.`,
     `adapter: ${adapterState.kind}`,
@@ -434,6 +490,20 @@ export function formatApprovalMessage(
     `target: ${pending.commandPreview}`,
     "Reply with /confirm <code> to continue or /deny to reject.",
   ].join("\n");
+}
+
+export function formatPendingApprovalReminder(
+  pending: PendingApproval,
+  adapterState: BridgeAdapterState,
+): string {
+  if (adapterState.kind === "claude") {
+    const target = pending.toolName
+      ? `${pending.toolName}${pending.detailPreview ? ` (${pending.detailPreview})` : ""}`
+      : pending.commandPreview;
+    return `Approval is pending for ${truncatePreview(target, 140)}. Reply with /confirm, confirm, or yes to continue, or /deny, deny, or no to reject.`;
+  }
+
+  return `Approval is pending for ${pending.commandPreview}. Reply with /confirm ${pending.code} or /deny.`;
 }
 
 export class OutputBatcher {
