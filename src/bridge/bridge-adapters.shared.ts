@@ -905,8 +905,8 @@ export function resolveShellRuntime(
       family: "powershell",
       launchArgs:
         platform === "win32"
-          ? ["-NoLogo", "-ExecutionPolicy", "Bypass", "-Command", "-"]
-          : ["-NoLogo", "-Command", "-"],
+          ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"]
+          : ["-NoLogo", "-NoProfile", "-NoExit"],
     };
   }
 
@@ -944,20 +944,24 @@ export function buildShellProfileCommand(
 export function buildShellInputPayload(
   text: string,
   family: ShellRuntimeFamily,
+  completionMarker = "__WECHAT_BRIDGE_DONE__",
 ): string {
   if (family === "powershell") {
+    const encodedCommand = Buffer.from(text, "utf8").toString("base64");
     const script = [
       "$__wechatBridgePreviousErrorActionPreference = $ErrorActionPreference",
       "$ErrorActionPreference = 'Continue'",
       "$global:LASTEXITCODE = 0",
       "try {",
-      text,
+      `  $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("${escapePowerShellString(encodedCommand)}"))`,
+      "  $scriptBlock = [scriptblock]::Create($decoded)",
+      "  & $scriptBlock",
       "} catch {",
       "  Write-Error $_",
       "  $global:LASTEXITCODE = 1",
       "} finally {",
       "  if (-not ($global:LASTEXITCODE -is [int])) { $global:LASTEXITCODE = 0 }",
-      '  Write-Output "__WECHAT_BRIDGE_DONE__:$global:LASTEXITCODE"',
+      `  Write-Output "${escapePowerShellString(completionMarker)}:$global:LASTEXITCODE"`,
       "  $ErrorActionPreference = $__wechatBridgePreviousErrorActionPreference",
       "}",
       "",
@@ -968,7 +972,7 @@ export function buildShellInputPayload(
   const script = [
     text,
     "__wechat_bridge_status=$?",
-    `printf '__WECHAT_BRIDGE_DONE__:%s\\n' "$__wechat_bridge_status"`,
+    `printf '%s:%s\\n' ${escapePosixShellString(completionMarker)} "$__wechat_bridge_status"`,
     "",
   ];
   return `${script.join("\r")}\r`;

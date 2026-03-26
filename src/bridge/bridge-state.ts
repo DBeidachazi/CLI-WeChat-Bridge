@@ -24,6 +24,7 @@ type BridgeStateOptions = {
 
 type BridgeLockPayload = {
   pid: number;
+  parentPid: number;
   instanceId: string;
   adapter: BridgeAdapterKind;
   command: string;
@@ -75,6 +76,7 @@ export class BridgeStateStore {
     this.instanceId = buildInstanceId();
     this.lockPayload = {
       pid: process.pid,
+      parentPid: process.ppid,
       instanceId: this.instanceId,
       adapter: options.adapter,
       command: options.command,

@@ -197,6 +197,7 @@ async function main() {
         console.log("  wechat-bridge-claude");
         console.log("  wechat-bridge-shell");
         console.log("  On Linux/macOS, wechat-bridge-shell defaults to pwsh, then bash, zsh, or sh.");
+        console.log("  Shell mode is a headless remote executor for non-interactive commands and scripts.");
         console.log();
         console.log("Repo-local development entrypoints are still available:");
         console.log("  bun run bridge:codex");

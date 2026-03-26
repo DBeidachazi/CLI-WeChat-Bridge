@@ -29,6 +29,7 @@ import {
   shouldIgnoreCodexSessionReplayEntry,
   shouldRecoverCodexStaleBusyState,
 } from "./bridge-adapters.ts";
+import { ShellAdapter, ShellCommandRejectedError } from "./bridge-adapters.shell.ts";
 
 const tempDirectories: string[] = [];
 const originalHome = process.env.HOME;
@@ -338,7 +339,14 @@ describe("resolveShellRuntime", () => {
   test("builds non-Windows PowerShell launch args", () => {
     expect(resolveShellRuntime("pwsh", { platform: "linux" })).toEqual({
       family: "powershell",
-      launchArgs: ["-NoLogo", "-Command", "-"],
+      launchArgs: ["-NoLogo", "-NoProfile", "-NoExit"],
+    });
+  });
+
+  test("builds Windows PowerShell launch args for a long-lived shell session", () => {
+    expect(resolveShellRuntime("powershell.exe", { platform: "win32" })).toEqual({
+      family: "powershell",
+      launchArgs: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"],
     });
   });
 
@@ -371,11 +379,239 @@ describe("shell helpers", () => {
 
   test("builds shell input payloads with a completion sentinel", () => {
     expect(buildShellInputPayload("Get-ChildItem", "powershell")).toContain(
+      "[System.Convert]::FromBase64String",
+    );
+    expect(buildShellInputPayload("Get-ChildItem", "powershell")).toContain(
       "__WECHAT_BRIDGE_DONE__",
     );
-    expect(buildShellInputPayload("ls", "posix")).toContain(
-      "printf '__WECHAT_BRIDGE_DONE__:%s\\n'",
+    expect(buildShellInputPayload("Get-ChildItem", "powershell")).not.toContain(
+      "__wechatBridgeInvoke",
     );
+    expect(buildShellInputPayload("ls", "posix")).toContain(
+      "printf '%s:%s\\n'",
+    );
+  });
+
+  test("supports a custom shell completion marker", () => {
+    expect(
+      buildShellInputPayload("Get-ChildItem", "powershell", "__WECHAT_BRIDGE_DONE__:abc"),
+    ).toContain('[System.Convert]::FromBase64String');
+    expect(
+      buildShellInputPayload("ls", "posix", "__WECHAT_BRIDGE_DONE__:abc"),
+    ).toContain("printf '%s:%s\\n' '__WECHAT_BRIDGE_DONE__:abc'");
+  });
+});
+
+describe("ShellAdapter", () => {
+  test("handles shell output without throwing when a command completes", () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: process.platform === "win32" ? "powershell.exe" : "bash",
+      cwd: process.cwd(),
+    });
+    const events: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    const internal = adapter as unknown as {
+      currentCompletionMarker: string;
+      currentPreview: string;
+      handleData: (text: string) => void;
+      hasAcceptedInput: boolean;
+      state: { status: string };
+    };
+    internal.currentCompletionMarker = "__WECHAT_BRIDGE_DONE__:cmd_0";
+    internal.currentPreview = "echo hello";
+    internal.hasAcceptedInput = true;
+    internal.state.status = "busy";
+
+    expect(() => {
+      internal.handleData("hello\r\n__WECHAT_BRIDGE_DONE__:cmd_0:0\r\n");
+    }).not.toThrow();
+
+    expect(
+      events.some((event) => event.type === "stdout" && event.text === "hello"),
+    ).toBe(true);
+    expect(
+      events.some((event) => event.type === "task_complete" && event.exitCode === 0),
+    ).toBe(true);
+  });
+
+  test("suppresses echoed shell input and waits for a split completion marker", () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: process.platform === "win32" ? "powershell.exe" : "bash",
+      cwd: process.cwd(),
+    });
+    const events: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    const internal = adapter as unknown as {
+      currentCompletionMarker: string;
+      currentPreview: string;
+      expectedEchoLines: string[];
+      handleData: (text: string) => void;
+      hasAcceptedInput: boolean;
+      state: { status: string; activeTurnOrigin?: string };
+    };
+    internal.currentCompletionMarker = "__WECHAT_BRIDGE_DONE__:cmd_1";
+    internal.currentPreview = "echo hello";
+    internal.expectedEchoLines = ["echo hello"];
+    internal.hasAcceptedInput = true;
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+
+    internal.handleData("echo hello\r\nhello\r\n__WECHAT_BRIDGE_DONE__:cmd_");
+
+    expect(events.map((event) => event.type)).toEqual(["stdout"]);
+    expect(events[0]?.text).toBe("hello");
+
+    internal.handleData("1:0\r\n");
+
+    expect(events.map((event) => event.type)).toEqual(["stdout", "status", "task_complete"]);
+    expect(events[2]?.exitCode).toBe(0);
+    expect(adapter.getState().status).toBe("idle");
+  });
+
+  test("strips concatenated PowerShell wrapper noise before forwarding visible output", () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: "powershell.exe",
+      cwd: process.cwd(),
+    });
+    const events: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    const internal = adapter as unknown as {
+      currentPreview: string;
+      expectedEchoLines: string[];
+      handleData: (text: string) => void;
+      hasAcceptedInput: boolean;
+      state: { status: string; activeTurnOrigin?: string };
+    };
+    internal.currentPreview = "python";
+    internal.expectedEchoLines = [
+      '$decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("cHl0aG9u"))',
+      "$scriptBlock = [scriptblock]::Create($decoded)",
+      "& $scriptBlock",
+    ];
+    internal.hasAcceptedInput = true;
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+
+    internal.handleData(
+      [
+        "$__wechatBridgePreviousErrorActionPreference = $ErrorActionPreferencePS>$ErrorActionPreference = 'Continue'PS>$global:LASTEXITCODE = 0PS>> try {",
+        '>> $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("cHl0aG9u"))',
+        ">> $scriptBlock = [scriptblock]::Create($decoded)",
+        ">> & $scriptBlock",
+        ">> } catch {",
+        ">>   Write-Error $_",
+        ">>   $global:LASTEXITCODE = 1",
+        ">> } finally {",
+        '>>   Write-Output "__WECHAT_BRIDGE_DONE__:$global:LASTEXITCODE"',
+        ">>   $ErrorActionPreference = $__wechatBridgePreviousErrorActionPreference",
+        '>> }Python 3.14.0 on win32',
+        "",
+      ].join("\r\n"),
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["stdout"]);
+    expect(events[0]?.text).toBe("Python 3.14.0 on win32");
+  });
+
+  test("rejects interactive shell entry commands before writing to the worker", async () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: "powershell.exe",
+      cwd: process.cwd(),
+    });
+
+    const internal = adapter as unknown as {
+      pty: { write: (value: string) => void } | null;
+    };
+    internal.pty = {
+      write: () => {
+        throw new Error("interactive command should not be written to the PTY");
+      },
+    };
+
+    await expect(adapter.sendInput("python")).rejects.toBeInstanceOf(
+      ShellCommandRejectedError,
+    );
+  });
+
+  test("accepts PowerShell completion sentinels prefixed by a bare prompt token", () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: "powershell.exe",
+      cwd: process.cwd(),
+    });
+    const events: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    const internal = adapter as unknown as {
+      currentCompletionMarker: string;
+      currentPreview: string;
+      handleData: (text: string) => void;
+      hasAcceptedInput: boolean;
+      state: { status: string; activeTurnOrigin?: string };
+    };
+    internal.currentCompletionMarker = "__WECHAT_BRIDGE_DONE__:cmd_3";
+    internal.currentPreview = "python";
+    internal.hasAcceptedInput = true;
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+
+    internal.handleData("> __WECHAT_BRIDGE_DONE__:cmd_3:0\r\n");
+
+    expect(events.map((event) => event.type)).toEqual(["status", "task_complete"]);
+    expect(events[1]?.exitCode).toBe(0);
+    expect(adapter.getState().status).toBe("idle");
+  });
+
+  test("interrupt settles the active shell command once and ignores late completion output", async () => {
+    const adapter = new ShellAdapter({
+      kind: "shell",
+      command: process.platform === "win32" ? "powershell.exe" : "bash",
+      cwd: process.cwd(),
+    });
+    const events: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    const internal = adapter as unknown as {
+      currentCompletionMarker: string;
+      currentPreview: string;
+      handleData: (text: string) => void;
+      hasAcceptedInput: boolean;
+      pty: { write: (value: string) => void } | null;
+      state: { status: string; activeTurnOrigin?: string };
+    };
+    internal.pty = {
+      write: () => undefined,
+    };
+    internal.currentCompletionMarker = "__WECHAT_BRIDGE_DONE__:cmd_2";
+    internal.currentPreview = "sleep 60";
+    internal.hasAcceptedInput = true;
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+
+    await adapter.interrupt();
+    await wait(1_600);
+
+    internal.handleData("__WECHAT_BRIDGE_DONE__:cmd_2:130\r\n");
+
+    expect(events.filter((event) => event.type === "task_complete")).toHaveLength(1);
+    expect(adapter.getState().status).toBe("idle");
   });
 });
 

@@ -56,6 +56,7 @@ type ActiveTask = {
 
 const POLL_RETRY_BASE_MS = 1_000;
 const POLL_RETRY_MAX_MS = 30_000;
+const PARENT_PROCESS_POLL_MS = 5_000;
 
 function log(message: string): void {
   process.stderr.write(`[wechat-bridge] ${message}\n`);
@@ -69,6 +70,19 @@ function computePollRetryDelayMs(consecutiveFailures: number): number {
   const normalizedFailures = Math.max(1, consecutiveFailures);
   const exponent = Math.min(normalizedFailures - 1, 5);
   return Math.min(POLL_RETRY_MAX_MS, POLL_RETRY_BASE_MS * 2 ** exponent);
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseCliArgs(argv: string[]): BridgeCliOptions {
@@ -140,8 +154,8 @@ function printUsageAndExit(): never {
       "Examples:",
       "  wechat-bridge-codex",
       "  wechat-bridge-claude --cwd ~/work/my-project",
-      "  wechat-bridge-shell --cmd pwsh",
-      "  wechat-bridge-shell --cmd bash",
+      "  wechat-bridge-shell --cmd pwsh   # headless shell executor for non-interactive commands/scripts",
+      "  wechat-bridge-shell --cmd bash   # headless shell executor for non-interactive commands/scripts",
       "  bun run bridge:codex            # repo-local development entrypoint",
       "",
     ].join("\n"),
@@ -224,8 +238,29 @@ async function main(): Promise<void> {
   const outputBatcher = new OutputBatcher(async (text) => {
     await queueWechatMessage(stateStore.getState().authorizedUserId, text);
   });
+  const startupParentPid = process.ppid;
+  const attachedToTerminal = Boolean(
+    process.stdin.isTTY || process.stdout.isTTY || process.stderr.isTTY,
+  );
+  let shutdownPromise: Promise<void> | null = null;
+  let requestedExitCode = 0;
+  let stdinDetached = false;
+  const parentWatchTimer =
+    attachedToTerminal && startupParentPid > 1
+      ? setInterval(() => {
+          if (shutdownPromise || isPidAlive(startupParentPid)) {
+            return;
+          }
+          log(`Parent process ${startupParentPid} exited. Stopping bridge.`);
+          void shutdown(0);
+        }, PARENT_PROCESS_POLL_MS)
+      : null;
+  parentWatchTimer?.unref();
 
   const cleanup = async () => {
+    if (parentWatchTimer) {
+      clearInterval(parentWatchTimer);
+    }
     try {
       await outputBatcher.flushNow();
     } catch {
@@ -245,13 +280,58 @@ async function main(): Promise<void> {
     stateStore.releaseLock();
   };
 
-  process.on("SIGINT", () => {
-    void cleanup().finally(() => process.exit(0));
+  const shutdown = async (exitCode = 0): Promise<void> => {
+    requestedExitCode = exitCode;
+    if (!shutdownPromise) {
+      shutdownPromise = cleanup().catch((error) => {
+        logError(`Shutdown cleanup failed: ${describeWechatTransportError(error)}`);
+      });
+    }
+    await shutdownPromise;
+  };
+
+  const requestShutdown = (message: string, exitCode = 0) => {
+    if (shutdownPromise) {
+      return;
+    }
+    log(message);
+    void shutdown(exitCode).finally(() => process.exit(requestedExitCode));
+  };
+
+  process.once("SIGINT", () => {
+    requestShutdown("Received SIGINT. Stopping bridge.");
   });
-  process.on("SIGTERM", () => {
-    void cleanup().finally(() => process.exit(0));
+  process.once("SIGTERM", () => {
+    requestShutdown("Received SIGTERM. Stopping bridge.");
   });
+  process.once("SIGHUP", () => {
+    requestShutdown("Terminal session closed. Stopping bridge.");
+  });
+  if (process.platform === "win32") {
+    process.once("SIGBREAK", () => {
+      requestShutdown("Received SIGBREAK. Stopping bridge.");
+    });
+  }
+  if (attachedToTerminal) {
+    process.stdin.on("close", () => {
+      if (stdinDetached) {
+        return;
+      }
+      stdinDetached = true;
+      requestShutdown("Standard input closed. Stopping bridge.");
+    });
+    process.stdin.on("end", () => {
+      if (stdinDetached) {
+        return;
+      }
+      stdinDetached = true;
+      requestShutdown("Standard input ended. Stopping bridge.");
+    });
+  }
   process.on("exit", () => {
+    if (parentWatchTimer) {
+      clearInterval(parentWatchTimer);
+    }
     stateStore.releaseLock();
   });
 
@@ -296,6 +376,10 @@ async function main(): Promise<void> {
     } else if (options.adapter === "claude") {
       log(
         'Start the visible Claude companion in a second terminal with: wechat-claude',
+      );
+    } else if (options.adapter === "shell") {
+      log(
+        "Shell mode runs as a headless remote executor for non-interactive commands and scripts.",
       );
     }
 
@@ -357,9 +441,16 @@ async function main(): Promise<void> {
           });
         } catch (err) {
           const errorText = err instanceof Error ? err.message : String(err);
+          const isUserFacingShellRejection =
+            err instanceof Error && err.name === "ShellCommandRejectedError";
           logError(errorText);
-          stateStore.appendLog(`inbound_error: ${errorText}`);
-          await queueWechatMessage(message.senderId, `Bridge error: ${errorText}`);
+          stateStore.appendLog(
+            `${isUserFacingShellRejection ? "inbound_rejected" : "inbound_error"}: ${errorText}`,
+          );
+          await queueWechatMessage(
+            message.senderId,
+            isUserFacingShellRejection ? errorText : `Bridge error: ${errorText}`,
+          );
         }
         if (nextTask) {
           activeTask = nextTask;
@@ -385,7 +476,7 @@ async function main(): Promise<void> {
       }
     }
   } finally {
-    await cleanup();
+    await shutdown(requestedExitCode);
   }
 }
 
@@ -593,7 +684,9 @@ function wireAdapterEvents(params: {
         stateStore.appendLog(`fatal_error: ${event.message}`);
         stateStore.clearPendingConfirmation();
         clearActiveTask();
-        void queueWechatMessage(authorizedUserId, `Bridge error: ${event.message}`);
+        void outputBatcher.flushNow().then(async () => {
+          await queueWechatMessage(authorizedUserId, `Bridge error: ${event.message}`);
+        });
         break;
     }
   });
