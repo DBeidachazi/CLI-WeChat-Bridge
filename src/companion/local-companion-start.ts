@@ -7,11 +7,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
-  BRIDGE_LOCK_FILE,
   BRIDGE_LOG_FILE,
   CREDENTIALS_FILE,
   migrateLegacyChannelFiles,
 } from "../wechat/channel-config.ts";
+import {
+  readBridgeLockFile,
+  shouldAutoReclaimBridgeLock,
+  type BridgeLockPayload,
+} from "../bridge/bridge-state.ts";
 import {
   clearLocalCompanionEndpoint,
   readLocalCompanionEndpoint,
@@ -22,15 +26,6 @@ type LocalCompanionStartCliOptions = {
   cwd: string;
   profile?: string;
   timeoutMs: number;
-};
-
-type BridgeLockPayload = {
-  pid: number;
-  instanceId: string;
-  adapter: string;
-  command: string;
-  cwd: string;
-  startedAt: string;
 };
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -63,7 +58,8 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
         [
           "Usage: wechat-codex-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "",
-          "Starts or reuses the Codex bridge for the current directory, waits for the local companion endpoint, then opens the visible Codex companion.",
+          "Starts or reuses a transient Codex bridge for the current directory, waits for the local companion endpoint, then opens the visible Codex companion.",
+          "Closing the visible Codex companion also stops that transient bridge.",
           "",
         ].join("\n"),
       );
@@ -152,17 +148,6 @@ async function stopExistingBridge(lock: BridgeLockPayload): Promise<void> {
   log(`Cleared stale local companion endpoint for previous workspace ${cwd}.`);
 }
 
-function readBridgeLock(): BridgeLockPayload | null {
-  try {
-    if (!fs.existsSync(BRIDGE_LOCK_FILE)) {
-      return null;
-    }
-    return JSON.parse(fs.readFileSync(BRIDGE_LOCK_FILE, "utf8")) as BridgeLockPayload;
-  } catch {
-    return null;
-  }
-}
-
 async function isEndpointReachable(endpoint: LocalCompanionEndpoint): Promise<boolean> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -204,8 +189,10 @@ async function readUsableEndpoint(cwd: string): Promise<LocalCompanionEndpoint |
   return null;
 }
 
-function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
-  const entryPath = path.resolve(MODULE_DIR, "..", "bridge", "wechat-bridge.ts");
+export function buildBackgroundBridgeArgs(
+  entryPath: string,
+  options: LocalCompanionStartCliOptions,
+): string[] {
   const args = [
     "--no-warnings",
     "--experimental-strip-types",
@@ -214,11 +201,20 @@ function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
     "codex",
     "--cwd",
     options.cwd,
+    "--lifecycle",
+    "companion_bound",
   ];
 
   if (options.profile) {
     args.push("--profile", options.profile);
   }
+
+  return args;
+}
+
+function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
+  const entryPath = path.resolve(MODULE_DIR, "..", "bridge", "wechat-bridge.ts");
+  const args = buildBackgroundBridgeArgs(entryPath, options);
 
   const child = spawn(process.execPath, args, {
     cwd: options.cwd,
@@ -251,14 +247,16 @@ async function waitForEndpoint(
 }
 
 async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promise<void> {
-  const existingEndpoint = await readUsableEndpoint(options.cwd);
-  if (existingEndpoint) {
-    log(`Reusing running bridge for ${options.cwd}.`);
-    return;
-  }
-
-  const lock = readBridgeLock();
+  const lock = readBridgeLockFile();
   if (lock && isPidAlive(lock.pid)) {
+    if (shouldAutoReclaimBridgeLock(lock)) {
+      await stopExistingBridge(lock);
+      log(`Starting replacement bridge in background for ${options.cwd}...`);
+      startBridgeInBackground(options);
+      await waitForEndpoint(options.cwd, options.timeoutMs);
+      return;
+    }
+
     if (!isSameWorkspaceCwd(lock.cwd, options.cwd)) {
       await stopExistingBridge(lock);
       log(`Starting replacement bridge in background for ${options.cwd}...`);
@@ -269,6 +267,12 @@ async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promis
 
     log(`Found running bridge for ${options.cwd}. Waiting for endpoint...`);
     await waitForEndpoint(options.cwd, options.timeoutMs);
+    return;
+  }
+
+  const existingEndpoint = await readUsableEndpoint(options.cwd);
+  if (existingEndpoint) {
+    log(`Reusing running bridge for ${options.cwd}.`);
     return;
   }
 
@@ -320,7 +324,7 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
+const isDirectRun = Boolean((import.meta as ImportMeta & { main?: boolean }).main);
 if (isDirectRun) {
   main().catch((error) => {
     log(error instanceof Error ? error.message : String(error));

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
 import {
+  buildBackgroundBridgeArgs,
   isSameWorkspaceCwd,
   normalizeComparablePath,
   parseCliArgs,
@@ -27,6 +28,28 @@ describe("local-companion-start helpers", () => {
     expect(options.cwd).toBe(path.resolve("./tmp/project"));
     expect(options.profile).toBe("work");
     expect(options.timeoutMs).toBe(25000);
+  });
+
+  test("buildBackgroundBridgeArgs binds the background bridge to the launcher lifetime", () => {
+    const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
+      cwd: path.resolve("./tmp/project"),
+      profile: "work",
+      timeoutMs: 15000,
+    });
+
+    expect(args).toEqual([
+      "--no-warnings",
+      "--experimental-strip-types",
+      "/tmp/wechat-bridge.ts",
+      "--adapter",
+      "codex",
+      "--cwd",
+      path.resolve("./tmp/project"),
+      "--lifecycle",
+      "companion_bound",
+      "--profile",
+      "work",
+    ]);
   });
 
   test("normalizeComparablePath is stable for the same logical cwd", () => {

@@ -16,6 +16,7 @@ import type {
   BridgeAdapter,
   BridgeAdapterState,
   BridgeEvent,
+  BridgeLifecycleMode,
   BridgeResumeSessionCandidate,
 } from "./bridge-types.ts";
 import {
@@ -246,6 +247,17 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
       if (this.socket === socket) {
         this.detachPanelSocket();
         if (!this.shuttingDown) {
+          if (shouldStopBridgeAfterCompanionDisconnect(this.options.lifecycle)) {
+            const message = `${this.options.kind} companion disconnected. Stopping transient bridge bound to ${getLocalCompanionCommandName(this.options.kind)}.`;
+            this.setStatus("stopped", message);
+            this.eventSink({
+              type: "shutdown_requested",
+              reason: "companion_disconnected",
+              message,
+              timestamp: nowIso(),
+            });
+            return;
+          }
           this.setStatus(
             "starting",
             `${this.options.kind} companion disconnected. Run "${getLocalCompanionCommandName(this.options.kind)}" again in a second terminal for this directory.`,
@@ -381,6 +393,12 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     });
     return await response;
   }
+}
+
+export function shouldStopBridgeAfterCompanionDisconnect(
+  lifecycle: BridgeLifecycleMode | undefined,
+): boolean {
+  return lifecycle === "companion_bound";
 }
 
 export abstract class AbstractPtyAdapter implements BridgeAdapter {

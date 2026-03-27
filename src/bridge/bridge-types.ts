@@ -1,4 +1,5 @@
 export type BridgeAdapterKind = "codex" | "claude" | "shell";
+export type BridgeLifecycleMode = "persistent" | "companion_bound";
 export type BridgeTurnOrigin = "wechat" | "local";
 export type BridgeSessionSwitchSource = BridgeTurnOrigin | "restore";
 export type BridgeSessionSwitchReason =
@@ -160,6 +161,13 @@ export type BridgeEvent =
   | {
       type: "fatal_error";
       message: string;
+      timestamp: string;
+    }
+  | {
+      type: "shutdown_requested";
+      reason: "companion_disconnected";
+      message: string;
+      exitCode?: number;
       timestamp: string;
     };
 

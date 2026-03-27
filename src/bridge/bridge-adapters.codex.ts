@@ -76,6 +76,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private rpcSocket: WebSocket | null = null;
   private rpcShuttingDown = false;
   private rpcReconnectPromise: Promise<boolean> | null = null;
+  private cleanPanelExitInProgress = false;
   private rpcRequestCounter = 0;
   private pendingRpcRequests = new Map<string, CodexRpcPendingRequest>();
   private sharedThreadId: string | null = null;
@@ -265,6 +266,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.detachLocalInputForwarding();
     }
     this.stopSessionPolling();
+    if (this.isNativePanelMode()) {
+      this.cleanPanelExitInProgress = true;
+    }
     await this.disconnectRpcClient();
     if (this.isNativePanelMode()) {
       await this.stopNativeClient();
@@ -357,6 +361,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
       this.nativeProcess = child;
       this.shuttingDown = false;
+      this.cleanPanelExitInProgress = false;
       this.hasAcceptedInput = false;
       this.state.pid = child.pid ?? undefined;
       this.state.startedAt = nowIso();
@@ -392,13 +397,23 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     signal?: NodeJS.Signals,
     startupError?: Error,
   ): void {
+    const expectedShutdown = shouldTreatCodexNativeExitAsExpected({
+      renderMode: this.options.renderMode,
+      shuttingDown: this.shuttingDown,
+      exitCode,
+      signal,
+      startupError,
+    });
+    if (expectedShutdown && this.isNativePanelMode()) {
+      this.cleanPanelExitInProgress = true;
+    }
+
     this.clearCompletionTimer();
     this.resetTurnTracking({ preserveThread: false });
     this.stopSessionPolling();
     void this.disconnectRpcClient();
     void this.stopAppServer();
 
-    const expectedShutdown = this.shuttingDown;
     this.shuttingDown = false;
     this.nativeProcess = null;
     this.state.status = "stopped";
@@ -949,7 +964,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.appServerLog = appendBoundedLog(this.appServerLog, chunk);
     });
     child.on("exit", (code, signal) => {
-      const expectedShutdown = this.appServerShuttingDown;
+      const expectedShutdown = shouldSuppressCodexTransportFatalError({
+        transportShuttingDown: this.appServerShuttingDown,
+        shuttingDown: this.shuttingDown,
+        cleanPanelExitInProgress: this.cleanPanelExitInProgress,
+      });
       this.appServer = null;
       this.appServerPort = null;
       this.appServerShuttingDown = false;
@@ -1116,7 +1135,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private handleRpcSocketClosed(): void {
-    const expectedShutdown = this.rpcShuttingDown || this.shuttingDown;
+    const expectedShutdown = shouldSuppressCodexTransportFatalError({
+      transportShuttingDown: this.rpcShuttingDown,
+      shuttingDown: this.shuttingDown,
+      cleanPanelExitInProgress: this.cleanPanelExitInProgress,
+    });
     this.rpcSocket = null;
     this.rejectPendingRpcRequests("Codex websocket connection closed.");
     this.rpcShuttingDown = false;
@@ -1134,7 +1157,26 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     this.rpcReconnectPromise = (async () => {
+      if (
+        shouldSuppressCodexTransportFatalError({
+          transportShuttingDown: this.rpcShuttingDown,
+          shuttingDown: this.shuttingDown,
+          cleanPanelExitInProgress: this.cleanPanelExitInProgress,
+        })
+      ) {
+        return false;
+      }
+
       if (!this.appServer || !this.appServerPort) {
+        if (
+          shouldSuppressCodexTransportFatalError({
+            transportShuttingDown: this.appServerShuttingDown,
+            shuttingDown: this.shuttingDown,
+            cleanPanelExitInProgress: this.cleanPanelExitInProgress,
+          })
+        ) {
+          return false;
+        }
         const details = this.describeAppServerLog();
         this.emit({
           type: "fatal_error",
@@ -1148,7 +1190,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       const reconnectDeadline = Date.now() + CODEX_RPC_RECONNECT_TIMEOUT_MS;
       let lastError = "Codex websocket connection closed.";
 
-      while (!this.shuttingDown && Date.now() < reconnectDeadline) {
+      while (
+        !this.shuttingDown &&
+        !this.cleanPanelExitInProgress &&
+        Date.now() < reconnectDeadline
+      ) {
         try {
           await this.connectRpcClient();
           return true;
@@ -1159,6 +1205,15 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       }
 
       const details = this.describeAppServerLog();
+      if (
+        shouldSuppressCodexTransportFatalError({
+          transportShuttingDown: this.appServerShuttingDown,
+          shuttingDown: this.shuttingDown,
+          cleanPanelExitInProgress: this.cleanPanelExitInProgress,
+        })
+      ) {
+        return false;
+      }
       this.emit({
         type: "fatal_error",
         message: `codex app-server websocket closed unexpectedly and could not reconnect: ${lastError}.${details}`,
@@ -2332,5 +2387,33 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       }
     }
   }
+}
+
+export function shouldTreatCodexNativeExitAsExpected(params: {
+  renderMode?: AdapterOptions["renderMode"];
+  shuttingDown: boolean;
+  exitCode: number | undefined;
+  signal?: NodeJS.Signals;
+  startupError?: Error;
+}): boolean {
+  return (
+    params.shuttingDown ||
+    (params.renderMode === "panel" &&
+      !params.startupError &&
+      !params.signal &&
+      params.exitCode === 0)
+  );
+}
+
+export function shouldSuppressCodexTransportFatalError(params: {
+  transportShuttingDown: boolean;
+  shuttingDown: boolean;
+  cleanPanelExitInProgress: boolean;
+}): boolean {
+  return (
+    params.transportShuttingDown ||
+    params.shuttingDown ||
+    params.cleanPanelExitInProgress
+  );
 }
 

@@ -13,6 +13,7 @@ import { BridgeStateStore } from "./bridge-state.ts";
 import type {
   BridgeAdapter,
   BridgeAdapterKind,
+  BridgeLifecycleMode,
   PendingApproval,
 } from "./bridge-types.ts";
 import {
@@ -47,6 +48,7 @@ type BridgeCliOptions = {
   command: string;
   cwd: string;
   profile?: string;
+  lifecycle: BridgeLifecycleMode;
 };
 
 type ActiveTask = {
@@ -85,11 +87,27 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function parseCliArgs(argv: string[]): BridgeCliOptions {
+export function formatUserFacingBridgeFatalError(message: string): string {
+  return `Bridge error: ${message.replace(/\s+Recent app-server log:.*$/s, "").trim()}`;
+}
+
+export function shouldWatchParentProcess(options: {
+  startupParentPid: number;
+  attachedToTerminal: boolean;
+  lifecycle: BridgeLifecycleMode;
+}): boolean {
+  return (
+    options.startupParentPid > 1 &&
+    (options.attachedToTerminal || options.lifecycle === "companion_bound")
+  );
+}
+
+export function parseCliArgs(argv: string[]): BridgeCliOptions {
   let adapter: BridgeAdapterKind | null = null;
   let commandOverride: string | undefined;
   let cwd = process.cwd();
   let profile: string | undefined;
+  let lifecycle: BridgeLifecycleMode = "persistent";
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -124,6 +142,16 @@ function parseCliArgs(argv: string[]): BridgeCliOptions {
         profile = next;
         i += 1;
         break;
+      case "--lifecycle":
+        if (!next || !["persistent", "companion_bound"].includes(next)) {
+          throw new Error(`Invalid lifecycle: ${next ?? "(missing)"}`);
+        }
+        lifecycle = next as BridgeLifecycleMode;
+        i += 1;
+        break;
+      case "--shutdown-on-parent-exit":
+        lifecycle = "companion_bound";
+        break;
       case "--help":
       case "-h":
         printUsageAndExit();
@@ -143,19 +171,21 @@ function parseCliArgs(argv: string[]): BridgeCliOptions {
     command: commandOverride ?? defaultCommand,
     cwd,
     profile,
+    lifecycle,
   };
 }
 
 function printUsageAndExit(): never {
   process.stdout.write(
     [
-      "Usage: wechat-bridge --adapter <codex|claude|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>]",
+      "Usage: wechat-bridge --adapter <codex|claude|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
       "",
       "Examples:",
       "  wechat-bridge-codex",
       "  wechat-bridge-claude --cwd ~/work/my-project",
       "  wechat-bridge-shell --cmd pwsh   # headless shell executor for non-interactive commands/scripts",
       "  wechat-bridge-shell --cmd bash   # headless shell executor for non-interactive commands/scripts",
+      "  wechat-bridge-codex --lifecycle companion_bound",
       "  bun run bridge:codex            # repo-local development entrypoint",
       "",
     ].join("\n"),
@@ -199,6 +229,7 @@ async function main(): Promise<void> {
     command: options.command,
     cwd: options.cwd,
     profile: options.profile,
+    lifecycle: options.lifecycle,
     initialSharedSessionId:
       stateStore.getState().sharedSessionId ?? stateStore.getState().sharedThreadId,
     initialResumeConversationId: stateStore.getState().resumeConversationId,
@@ -246,7 +277,11 @@ async function main(): Promise<void> {
   let requestedExitCode = 0;
   let stdinDetached = false;
   const parentWatchTimer =
-    attachedToTerminal && startupParentPid > 1
+    shouldWatchParentProcess({
+      startupParentPid,
+      attachedToTerminal,
+      lifecycle: options.lifecycle,
+    })
       ? setInterval(() => {
           if (shutdownPromise || isPidAlive(startupParentPid)) {
             return;
@@ -355,6 +390,7 @@ async function main(): Promise<void> {
       syncSharedSessionState: () => {
         syncSharedSessionState(stateStore, adapter);
       },
+      requestShutdown,
     });
 
     await adapter.start();
@@ -526,6 +562,7 @@ function wireAdapterEvents(params: {
   clearActiveTask: () => void;
   updateLastOutputAt: () => void;
   syncSharedSessionState: () => void;
+  requestShutdown: (message: string, exitCode?: number) => void;
 }): void {
   const {
     adapter,
@@ -539,6 +576,7 @@ function wireAdapterEvents(params: {
     clearActiveTask,
     updateLastOutputAt,
     syncSharedSessionState,
+    requestShutdown,
   } = params;
 
   adapter.setEventSink((event) => {
@@ -685,8 +723,15 @@ function wireAdapterEvents(params: {
         stateStore.clearPendingConfirmation();
         clearActiveTask();
         void outputBatcher.flushNow().then(async () => {
-          await queueWechatMessage(authorizedUserId, `Bridge error: ${event.message}`);
+          await queueWechatMessage(
+            authorizedUserId,
+            formatUserFacingBridgeFatalError(event.message),
+          );
         });
+        break;
+      case "shutdown_requested":
+        stateStore.appendLog(`shutdown_requested: ${event.reason}`);
+        requestShutdown(event.message, event.exitCode ?? 0);
         break;
     }
   });
@@ -864,7 +909,10 @@ async function handleInboundMessage(params: {
   return activeTask;
 }
 
-main().catch((err) => {
-  logError(describeWechatTransportError(err));
-  process.exit(1);
-});
+const isDirectRun = Boolean((import.meta as ImportMeta & { main?: boolean }).main);
+if (isDirectRun) {
+  main().catch((err) => {
+    logError(describeWechatTransportError(err));
+    process.exit(1);
+  });
+}

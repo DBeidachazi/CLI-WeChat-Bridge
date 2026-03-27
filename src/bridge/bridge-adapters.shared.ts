@@ -34,6 +34,7 @@ import type {
   ApprovalRequest,
   BridgeAdapter,
   BridgeAdapterKind,
+  BridgeLifecycleMode,
   BridgeNoticeLevel,
   BridgeResumeSessionCandidate,
   BridgeResumeThreadCandidate,
@@ -56,6 +57,7 @@ export type AdapterOptions = {
   command: string;
   cwd: string;
   profile?: string;
+  lifecycle?: BridgeLifecycleMode;
   initialSharedSessionId?: string;
   initialSharedThreadId?: string;
   initialResumeConversationId?: string;
