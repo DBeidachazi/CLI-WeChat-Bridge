@@ -6,7 +6,7 @@ import {
   isSameWorkspaceCwd,
   normalizeComparablePath,
   parseCliArgs,
-} from "./local-companion-start.ts";
+} from "../../src/companion/local-companion-start.ts";
 
 describe("local-companion-start helpers", () => {
   test("parseCliArgs uses current working directory by default", () => {

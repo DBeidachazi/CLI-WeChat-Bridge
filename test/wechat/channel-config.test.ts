@@ -6,7 +6,7 @@ import {
   buildWorkspaceKey,
   getWorkspaceChannelPaths,
   normalizeWorkspacePath,
-} from "./channel-config.ts";
+} from "../../src/wechat/channel-config.ts";
 
 describe("workspace channel paths", () => {
   test("normalizes a workspace path to an absolute path", () => {

@@ -6,3 +6,4 @@ log.md
 .codex-app-ts/
 tmp-codex-*.log
 plan/
+architecture/

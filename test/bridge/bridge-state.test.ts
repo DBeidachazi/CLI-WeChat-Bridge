@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   normalizeBridgeLockPayload,
   shouldAutoReclaimBridgeLock,
-} from "./bridge-state.ts";
+} from "../../src/bridge/bridge-state.ts";
 
 describe("bridge-state lock helpers", () => {
   test("normalizeBridgeLockPayload defaults old lock files to persistent lifecycle", () => {

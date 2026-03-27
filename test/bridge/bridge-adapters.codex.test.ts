@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   shouldSuppressCodexTransportFatalError,
   shouldTreatCodexNativeExitAsExpected,
-} from "./bridge-adapters.codex.ts";
+} from "../../src/bridge/bridge-adapters.codex.ts";
 
 describe("codex exit handling", () => {
   test("treats a clean native panel exit as expected", () => {

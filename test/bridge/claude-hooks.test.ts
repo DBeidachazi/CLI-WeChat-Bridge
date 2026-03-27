@@ -10,7 +10,7 @@ import {
   findInjectedClaudePromptIndex,
   normalizeClaudeAssistantMessage,
   parseClaudeHookPayload,
-} from "./claude-hooks.ts";
+} from "../../src/bridge/claude-hooks.ts";
 
 describe("parseClaudeHookPayload", () => {
   test("parses JSON hook payloads", () => {

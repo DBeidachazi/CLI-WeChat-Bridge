@@ -4,7 +4,7 @@ import {
   formatUserFacingBridgeFatalError,
   parseCliArgs,
   shouldWatchParentProcess,
-} from "./wechat-bridge.ts";
+} from "../../src/bridge/wechat-bridge.ts";
 
 describe("wechat-bridge cli helpers", () => {
   test("parseCliArgs keeps persistent lifecycle by default", () => {

@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 
-import type { BridgeAdapterState, BridgeState } from "./bridge-types.ts";
+import type {
+  BridgeAdapterState,
+  BridgeState,
+} from "../../src/bridge/bridge-types.ts";
 import {
   buildOneTimeCode,
   detectCliApproval,
@@ -24,7 +27,7 @@ import {
   parseSystemCommand,
   parseWechatControlCommand,
   shouldDropStartupBacklogMessage,
-} from "./bridge-utils.ts";
+} from "../../src/bridge/bridge-utils.ts";
 
 describe("parseSystemCommand", () => {
   test("parses supported control commands", () => {

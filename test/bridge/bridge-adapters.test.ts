@@ -28,8 +28,11 @@ import {
   shouldAutoCompleteCodexWechatTurnAfterFinalReply,
   shouldIgnoreCodexSessionReplayEntry,
   shouldRecoverCodexStaleBusyState,
-} from "./bridge-adapters.ts";
-import { ShellAdapter, ShellCommandRejectedError } from "./bridge-adapters.shell.ts";
+} from "../../src/bridge/bridge-adapters.ts";
+import {
+  ShellAdapter,
+  ShellCommandRejectedError,
+} from "../../src/bridge/bridge-adapters.shell.ts";
 
 const tempDirectories: string[] = [];
 const originalHome = process.env.HOME;

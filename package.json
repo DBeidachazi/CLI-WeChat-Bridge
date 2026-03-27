@@ -37,7 +37,11 @@
     "bridge:claude": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter claude",
     "bridge:shell": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter shell",
     "bridge:bun": "bun src/bridge/wechat-bridge.ts",
-    "test": "bun test"
+    "test": "bun test test",
+    "test:bridge": "bun test test/bridge",
+    "test:companion": "bun test test/companion",
+    "test:wechat": "bun test test/wechat",
+    "test:watch": "bun test --watch test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -52,6 +56,5 @@
   "engines": {
     "bun": ">=1.0.0",
     "node": ">=24.0.0"
-  },
-  "license": "MIT"
+  }
 }

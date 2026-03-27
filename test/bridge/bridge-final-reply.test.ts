@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { forwardWechatFinalReply } from "./bridge-final-reply.ts";
+import { forwardWechatFinalReply } from "../../src/bridge/bridge-final-reply.ts";
 
 describe("forwardWechatFinalReply", () => {
   test("sends stripped text before attachments in listed order", async () => {

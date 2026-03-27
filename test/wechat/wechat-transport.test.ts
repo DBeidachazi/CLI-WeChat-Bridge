@@ -6,7 +6,7 @@ import {
   describeWechatTransportError,
   formatByteSize,
   resolveMediaUploadLimitBytes,
-} from "./wechat-transport.ts";
+} from "../../src/wechat/wechat-transport.ts";
 
 describe("wechat upload limits", () => {
   test("uses the default per-media upload limits", () => {

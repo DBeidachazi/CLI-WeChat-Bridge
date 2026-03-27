@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { shouldStopBridgeAfterCompanionDisconnect } from "./bridge-adapters.core.ts";
+import { shouldStopBridgeAfterCompanionDisconnect } from "../../src/bridge/bridge-adapters.core.ts";
 
 describe("local companion proxy lifecycle", () => {
   test("persistent bridges stay alive after companion disconnect", () => {
