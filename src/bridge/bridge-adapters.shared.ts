@@ -777,6 +777,28 @@ export function copyDefinedEnv(
   return result;
 }
 
+function mergeNoProxyValue(value?: string): string {
+  const requiredHosts = ["127.0.0.1", "localhost", "::1"];
+  const merged = new Set(
+    (value ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+
+  for (const host of requiredHosts) {
+    merged.add(host);
+  }
+
+  return Array.from(merged).join(",");
+}
+
+function applyLoopbackNoProxy(env: Record<string, string>): Record<string, string> {
+  env.NO_PROXY = mergeNoProxyValue(env.NO_PROXY);
+  env.no_proxy = mergeNoProxyValue(env.no_proxy);
+  return env;
+}
+
 export function resolveDefaultAdapterCommand(
   kind: BridgeAdapterKind,
   options: {
@@ -817,10 +839,10 @@ export function buildCliEnvironment(
 
   if (kind === "codex" || kind === "claude") {
     if (platform !== "win32") {
-      return {
+      return applyLoopbackNoProxy({
         ...copyDefinedEnv(sourceEnv),
         TERM: sourceEnv.TERM || "xterm-256color",
-      };
+      });
     }
 
     const env: Record<string, string> = {
@@ -858,7 +880,7 @@ export function buildCliEnvironment(
       env.HOME = env.USERPROFILE;
     }
 
-    return env;
+    return applyLoopbackNoProxy(env);
   }
 
   return {
@@ -1483,4 +1505,3 @@ export function resolveSpawnTarget(
 
   return { file: resolved, args: [...forwardArgs] };
 }
-

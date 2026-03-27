@@ -297,6 +297,8 @@ describe("buildCliEnvironment", () => {
     expect(env.PATH).toBe("C:\\tools");
     expect(env.HOME).toBe("C:\\Users\\tester");
     expect(env.FOO).toBeUndefined();
+    expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
+    expect(env.no_proxy).toBe("127.0.0.1,localhost,::1");
   });
 
   test("passes through the non-Windows CLI environment", () => {
@@ -312,6 +314,23 @@ describe("buildCliEnvironment", () => {
     expect(env.PATH).toBe("/usr/bin");
     expect(env.HOME).toBe("/home/tester");
     expect(env.FOO).toBe("bar");
+    expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
+    expect(env.no_proxy).toBe("127.0.0.1,localhost,::1");
+  });
+
+  test("preserves existing no_proxy values while adding local loopback hosts", () => {
+    const env = buildCliEnvironment("codex", {
+      platform: "linux",
+      env: {
+        PATH: "/usr/bin",
+        HOME: "/home/tester",
+        NO_PROXY: "example.com,localhost",
+        no_proxy: "internal.test,127.0.0.1",
+      },
+    });
+
+    expect(env.NO_PROXY).toBe("example.com,localhost,127.0.0.1,::1");
+    expect(env.no_proxy).toBe("internal.test,127.0.0.1,localhost,::1");
   });
 });
 
