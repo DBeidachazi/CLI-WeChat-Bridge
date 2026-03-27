@@ -131,6 +131,19 @@ wechat-codex
 
 如果你第一次使用本项目，建议优先从 `codex` 模式开始。当前仓库中，`codex` 是实现最完整、会话一致性与本地/远程衔接能力最完善的适配器路径。
 
+如果你更希望用**单命令入口**快速启动，也可以直接使用：
+
+```bash
+wechat-codex-start
+```
+
+它会自动完成以下动作：
+
+1. 复用当前目录已运行的 `wechat-bridge-codex`
+2. 如果 bridge 正在服务其他目录，则停止旧 bridge 并切换到当前目录
+3. 等待当前目录对应的本地 companion endpoint 就绪
+4. 打开可见的 `wechat-codex` 会话
+
 ### 5. 启动 Claude Code （不走Channels）
 
 与 Codex 类似的，
@@ -167,6 +180,7 @@ wechat-claude
 ```bash
 wechat-bridge-codex
 wechat-codex
+wechat-codex-start
 wechat-bridge-claude
 wechat-claude
 wechat-bridge-shell
@@ -178,6 +192,7 @@ wechat-bridge-shell
 bun run setup
 bun run bridge:codex
 bun run codex:panel
+bun run codex:start
 bun run bridge:claude
 bun run claude:companion
 bun run bridge:shell
@@ -206,6 +221,21 @@ wechat-bridge-shell --cmd pwsh.exe
 - `--cwd <path>`：指定工作目录
 - `--cmd <executable>`：覆盖默认命令
 - `--profile <name-or-path>`：向适配器传入 profile
+
+### `wechat-codex-start` 参数
+
+示例：
+
+```bash
+wechat-codex-start --cwd D:\work\my-project
+wechat-codex-start --profile work
+```
+
+支持参数：
+
+- `--cwd <path>`：显式指定 bridge / companion 对应的工作目录
+- `--profile <name-or-path>`：转发给后台启动的 `wechat-bridge-codex`
+- `--timeout-ms <ms>`：等待当前目录 endpoint 的最长时间，默认 `15000`
 
 ## 微信侧支持的指令
 
@@ -326,6 +356,12 @@ npm install -g @unlinearity/cli-wechat-bridge@latest
 
 1. 先在目标目录启动 `wechat-bridge-codex`
 2. 再在同一目录启动 `wechat-codex`
+
+如果你不想手动分两个终端，也可以直接执行：
+
+```bash
+wechat-codex-start
+```
 
 ### 2. 全局命令不存在
 
