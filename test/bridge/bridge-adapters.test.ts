@@ -1506,6 +1506,257 @@ describe("Codex panel completion recovery", () => {
     expect(adapter.state.activeTurnId).toBe("turn_2");
     expect(adapter.state.activeTurnOrigin).toBe("wechat");
   });
+
+  test("mirrors the first local turn after /resume before shared thread follow catches up", () => {
+    const adapter = createBridgeAdapter({
+      kind: "codex",
+      command: "codex",
+      cwd: process.cwd(),
+      renderMode: "panel",
+    }) as any;
+    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
+    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
+      events.push(event),
+    );
+    adapter.sharedThreadId = "thread_old";
+    adapter.state.sharedSessionId = "thread_old";
+    adapter.state.sharedThreadId = "thread_old";
+    adapter.state.status = "idle";
+
+    adapter.handleRpcNotification("turn/started", {
+      threadId: "thread_new",
+      turnId: "turn_local_1",
+    });
+    adapter.handleRpcNotification("item/started", {
+      threadId: "thread_new",
+      turnId: "turn_local_1",
+      item: {
+        type: "userMessage",
+        id: "item_1",
+        content: [
+          {
+            type: "text",
+            text: "First local turn after /resume",
+            text_elements: [],
+          },
+        ],
+      },
+    });
+
+    expect(adapter.activeTurn).toEqual({
+      threadId: "thread_new",
+      turnId: "turn_local_1",
+      origin: "local",
+    });
+    expect(
+      events
+        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .map((event) =>
+          event.type === "thread_switched"
+            ? { type: event.type, threadId: event.threadId }
+            : { type: event.type, text: event.text },
+        ),
+    ).toEqual([
+      {
+        type: "thread_switched",
+        threadId: "thread_new",
+      },
+      {
+        type: "mirrored_user_input",
+        text: "First local turn after /resume",
+      },
+    ]);
+  });
+
+  test("mirrors the first local turn during startup before any shared thread is established", () => {
+    const adapter = createBridgeAdapter({
+      kind: "codex",
+      command: "codex",
+      cwd: process.cwd(),
+      renderMode: "panel",
+    }) as any;
+    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
+    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
+      events.push(event),
+    );
+    adapter.state.status = "idle";
+
+    adapter.handleRpcNotification("item/started", {
+      threadId: "thread_bootstrap_1",
+      turnId: "turn_local_bootstrap_1",
+      item: {
+        type: "userMessage",
+        id: "item_bootstrap_1",
+        content: [
+          {
+            type: "text",
+            text: "First local turn after bridge startup",
+            text_elements: [],
+          },
+        ],
+      },
+    });
+    adapter.handleRpcNotification("turn/started", {
+      threadId: "thread_bootstrap_1",
+      turnId: "turn_local_bootstrap_1",
+    });
+
+    expect(adapter.activeTurn).toEqual({
+      threadId: "thread_bootstrap_1",
+      turnId: "turn_local_bootstrap_1",
+      origin: "local",
+    });
+    expect(
+      events
+        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .map((event) =>
+          event.type === "thread_switched"
+            ? { type: event.type, threadId: event.threadId }
+            : { type: event.type, text: event.text },
+        ),
+    ).toEqual([
+      {
+        type: "thread_switched",
+        threadId: "thread_bootstrap_1",
+      },
+      {
+        type: "mirrored_user_input",
+        text: "First local turn after bridge startup",
+      },
+    ]);
+  });
+
+  test("mirrors the first local turn after /resume even when item/started arrives before turn/started", () => {
+    const adapter = createBridgeAdapter({
+      kind: "codex",
+      command: "codex",
+      cwd: process.cwd(),
+      renderMode: "panel",
+    }) as any;
+    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
+    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
+      events.push(event),
+    );
+    adapter.sharedThreadId = "thread_old";
+    adapter.state.sharedSessionId = "thread_old";
+    adapter.state.sharedThreadId = "thread_old";
+    adapter.state.status = "idle";
+
+    adapter.handleRpcNotification("item/started", {
+      threadId: "thread_newer",
+      turnId: "turn_local_newer",
+      item: {
+        type: "userMessage",
+        id: "item_newer",
+        content: [
+          {
+            type: "text",
+            text: "First local turn after /resume with item first",
+            text_elements: [],
+          },
+        ],
+      },
+    });
+    adapter.handleRpcNotification("turn/started", {
+      threadId: "thread_newer",
+      turnId: "turn_local_newer",
+    });
+
+    expect(adapter.activeTurn).toEqual({
+      threadId: "thread_newer",
+      turnId: "turn_local_newer",
+      origin: "local",
+    });
+    expect(
+      events
+        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .map((event) =>
+          event.type === "thread_switched"
+            ? { type: event.type, threadId: event.threadId }
+            : { type: event.type, text: event.text },
+        ),
+    ).toEqual([
+      {
+        type: "thread_switched",
+        threadId: "thread_newer",
+      },
+      {
+        type: "mirrored_user_input",
+        text: "First local turn after /resume with item first",
+      },
+    ]);
+  });
+
+  test("announces the startup thread after the local follow candidate settles", async () => {
+    const adapter = createBridgeAdapter({
+      kind: "codex",
+      command: "codex",
+      cwd: process.cwd(),
+      renderMode: "panel",
+    }) as any;
+    const events: Array<{ type: string; threadId?: string }> = [];
+    adapter.setEventSink((event: { type: string; threadId?: string }) => events.push(event));
+    adapter.state.status = "idle";
+
+    adapter.handleRpcNotification("thread/status/changed", {
+      threadId: "thread_settle_1",
+      status: {
+        type: "idle",
+      },
+    });
+
+    await wait(220);
+
+    expect(
+      events
+        .filter((event) => event.type === "thread_switched")
+        .map((event) => ({ type: event.type, threadId: event.threadId })),
+    ).toEqual([
+      {
+        type: "thread_switched",
+        threadId: "thread_settle_1",
+      },
+    ]);
+  });
+
+  test("only announces the latest startup thread candidate when the first one is replaced", async () => {
+    const adapter = createBridgeAdapter({
+      kind: "codex",
+      command: "codex",
+      cwd: process.cwd(),
+      renderMode: "panel",
+    }) as any;
+    const events: Array<{ type: string; threadId?: string }> = [];
+    adapter.setEventSink((event: { type: string; threadId?: string }) => events.push(event));
+    adapter.state.status = "idle";
+
+    adapter.handleRpcNotification("thread/status/changed", {
+      threadId: "thread_stale_candidate",
+      status: {
+        type: "idle",
+      },
+    });
+    await wait(40);
+    adapter.handleRpcNotification("thread/status/changed", {
+      threadId: "thread_final_candidate",
+      status: {
+        type: "idle",
+      },
+    });
+
+    await wait(220);
+
+    expect(
+      events
+        .filter((event) => event.type === "thread_switched")
+        .map((event) => ({ type: event.type, threadId: event.threadId })),
+    ).toEqual([
+      {
+        type: "thread_switched",
+        threadId: "thread_final_candidate",
+      },
+    ]);
+  });
 });
 
 describe("findRecentCodexSessionFileForCwd", () => {

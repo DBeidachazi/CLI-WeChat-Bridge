@@ -23,6 +23,19 @@ type CodexPendingApprovalRequest = shared.CodexPendingApprovalRequest;
 type CodexQueuedNotification = shared.CodexQueuedNotification;
 type CodexRpcPendingRequest = shared.CodexRpcPendingRequest;
 type CodexRpcRequestId = shared.CodexRpcRequestId;
+type CodexThreadAnnouncementSignal =
+  | "status_changed"
+  | "thread_started"
+  | "session_fallback"
+  | "turn_started"
+  | "user_message";
+type CodexPendingThreadAnnouncement = {
+  threadId: string;
+  source: BridgeThreadSwitchSource;
+  reason: BridgeThreadSwitchReason;
+  signals: Set<CodexThreadAnnouncementSignal>;
+  timer: ReturnType<typeof setTimeout> | null;
+};
 
 const {
   CODEX_APP_SERVER_HOST,
@@ -67,6 +80,8 @@ const {
   waitForTcpPort,
 } = shared;
 
+const CODEX_LOCAL_THREAD_ANNOUNCE_SETTLE_MS = 150;
+
 export class CodexPtyAdapter extends AbstractPtyAdapter {
   private appServer: ChildProcessWithoutNullStreams | null = null;
   private nativeProcess: ChildProcess | null = null;
@@ -80,6 +95,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private rpcRequestCounter = 0;
   private pendingRpcRequests = new Map<string, CodexRpcPendingRequest>();
   private sharedThreadId: string | null = null;
+  private announcedThreadId: string | null = null;
+  private pendingThreadAnnouncement: CodexPendingThreadAnnouncement | null = null;
   private activeTurn: CodexActiveTurn | null = null;
   private bridgeOwnedTurnIds = new Set<string>();
   private recentBridgeThreadSignalAtById = new Map<string, number>();
@@ -578,11 +595,15 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         return;
       }
 
-      this.updateSharedThread(candidate.threadId, {
-        source: "local",
-        reason: "local_session_fallback",
-        notify: true,
-      });
+      if (!this.activeTurn || this.activeTurn.threadId === candidate.threadId) {
+        this.trackLocalSharedThread(candidate.threadId, {
+          reason: "local_session_fallback",
+          signal: "session_fallback",
+        });
+        this.pendingThreadFollowId = null;
+      } else {
+        this.pendingThreadFollowId = candidate.threadId;
+      }
     }
 
     if (this.sessionFilePath !== candidate.filePath) {
@@ -1484,6 +1505,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.state.activeTurnId = undefined;
     this.state.activeTurnOrigin = undefined;
     if (!options.preserveThread) {
+      this.clearPendingThreadAnnouncement();
+      this.announcedThreadId = null;
+    }
+    if (!options.preserveThread) {
       this.updateSharedThread(null);
     }
   }
@@ -1500,6 +1525,16 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.sharedThreadId = threadId;
     this.state.sharedSessionId = threadId ?? undefined;
     this.state.sharedThreadId = threadId ?? undefined;
+    if (!threadId) {
+      this.clearPendingThreadAnnouncement();
+      this.announcedThreadId = null;
+    } else if (
+      previousThreadId !== threadId &&
+      this.pendingThreadAnnouncement &&
+      this.pendingThreadAnnouncement.threadId !== threadId
+    ) {
+      this.clearPendingThreadAnnouncement();
+    }
     if (threadId && options.source && options.reason) {
       const switchedAt = nowIso();
       this.state.lastSessionSwitchAt = switchedAt;
@@ -1508,14 +1543,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.state.lastThreadSwitchAt = switchedAt;
       this.state.lastThreadSwitchSource = options.source;
       this.state.lastThreadSwitchReason = options.reason;
-      if (options.notify && previousThreadId !== threadId) {
-        this.emit({
-          type: "thread_switched",
-          threadId,
-          source: options.source,
-          reason: options.reason,
-          timestamp: switchedAt,
-        });
+      if (options.notify) {
+        this.emitThreadSwitched(threadId, options.source, options.reason);
       }
     }
     if (previousThreadId !== threadId) {
@@ -1540,12 +1569,136 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     if (!activeTurn && this.pendingThreadFollowId) {
       const pendingThreadId = this.pendingThreadFollowId;
       this.pendingThreadFollowId = null;
-      this.updateSharedThread(pendingThreadId, {
-        source: "local",
+      this.trackLocalSharedThread(pendingThreadId, {
         reason: "local_follow",
-        notify: true,
+        signal: "status_changed",
       });
     }
+  }
+
+  private clearPendingThreadAnnouncement(): void {
+    if (!this.pendingThreadAnnouncement) {
+      return;
+    }
+    if (this.pendingThreadAnnouncement.timer) {
+      clearTimeout(this.pendingThreadAnnouncement.timer);
+    }
+    this.pendingThreadAnnouncement = null;
+  }
+
+  private emitThreadSwitched(
+    threadId: string,
+    source: BridgeThreadSwitchSource,
+    reason: BridgeThreadSwitchReason,
+  ): void {
+    if (this.announcedThreadId === threadId) {
+      if (this.pendingThreadAnnouncement?.threadId === threadId) {
+        this.clearPendingThreadAnnouncement();
+      }
+      return;
+    }
+
+    if (this.pendingThreadAnnouncement?.threadId === threadId) {
+      this.clearPendingThreadAnnouncement();
+    }
+
+    const switchedAt = nowIso();
+    this.announcedThreadId = threadId;
+    this.state.lastSessionSwitchAt = switchedAt;
+    this.state.lastSessionSwitchSource = source;
+    this.state.lastSessionSwitchReason = reason;
+    this.state.lastThreadSwitchAt = switchedAt;
+    this.state.lastThreadSwitchSource = source;
+    this.state.lastThreadSwitchReason = reason;
+    this.emit({
+      type: "thread_switched",
+      threadId,
+      source,
+      reason,
+      timestamp: switchedAt,
+    });
+  }
+
+  private isPendingThreadAnnouncementStable(
+    pending: CodexPendingThreadAnnouncement,
+  ): boolean {
+    return pending.signals.has("user_message") || pending.signals.size >= 2;
+  }
+
+  private schedulePendingThreadAnnouncement(): void {
+    const pending = this.pendingThreadAnnouncement;
+    if (!pending || pending.timer || !this.isNativePanelMode()) {
+      return;
+    }
+
+    pending.timer = setTimeout(() => {
+      const current = this.pendingThreadAnnouncement;
+      if (!current || current.threadId !== pending.threadId) {
+        return;
+      }
+      current.timer = null;
+      this.updateSharedThread(current.threadId, {
+        source: current.source,
+        reason: current.reason,
+        notify: true,
+      });
+    }, CODEX_LOCAL_THREAD_ANNOUNCE_SETTLE_MS);
+    pending.timer.unref?.();
+  }
+
+  private trackLocalSharedThread(
+    threadId: string,
+    options: {
+      reason: BridgeThreadSwitchReason;
+      signal: CodexThreadAnnouncementSignal;
+    },
+  ): void {
+    if (!this.isNativePanelMode()) {
+      this.updateSharedThread(threadId, {
+        source: "local",
+        reason: options.reason,
+        notify: true,
+      });
+      return;
+    }
+
+    this.updateSharedThread(threadId, {
+      source: "local",
+      reason: options.reason,
+    });
+
+    if (this.announcedThreadId === threadId) {
+      if (this.pendingThreadAnnouncement?.threadId === threadId) {
+        this.clearPendingThreadAnnouncement();
+      }
+      return;
+    }
+
+    if (!this.pendingThreadAnnouncement || this.pendingThreadAnnouncement.threadId !== threadId) {
+      this.clearPendingThreadAnnouncement();
+      this.pendingThreadAnnouncement = {
+        threadId,
+        source: "local",
+        reason: options.reason,
+        signals: new Set<CodexThreadAnnouncementSignal>(),
+        timer: null,
+      };
+    }
+
+    this.pendingThreadAnnouncement.source = "local";
+    this.pendingThreadAnnouncement.reason = options.reason;
+    this.pendingThreadAnnouncement.signals.add(options.signal);
+
+    if (this.isPendingThreadAnnouncementStable(this.pendingThreadAnnouncement)) {
+      this.updateSharedThread(threadId, {
+        source: "local",
+        reason: options.reason,
+        notify: true,
+      });
+      return;
+    }
+
+    this.schedulePendingThreadAnnouncement();
   }
 
   private rememberBridgeOwnedThreadSignal(threadId: string): void {
@@ -1785,6 +1938,27 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       };
     }
 
+    if (this.activeTurn?.turnId === turnId) {
+      return {
+        threadId,
+        turnId,
+        origin: this.activeTurn.origin,
+      };
+    }
+
+    const localBootstrapUserMessage =
+      this.isNativePanelMode() &&
+      !this.activeTurn &&
+      (method === "item/started" || method === "item/completed") &&
+      extractCodexUserMessageText(params.item);
+    if (localBootstrapUserMessage) {
+      return {
+        threadId,
+        turnId,
+        origin: "local",
+      };
+    }
+
     if (this.sharedThreadId && threadId === this.sharedThreadId) {
       return {
         threadId,
@@ -1962,10 +2136,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     if (!this.activeTurn || this.activeTurn.threadId === threadId) {
-      this.updateSharedThread(threadId, {
-        source: "local",
+      this.trackLocalSharedThread(threadId, {
         reason: "local_follow",
-        notify: true,
+        signal: "status_changed",
       });
       this.pendingThreadFollowId = null;
       return;
@@ -1992,10 +2165,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     if (!this.activeTurn || this.activeTurn.threadId === threadId) {
-      this.updateSharedThread(threadId, {
-        source: "local",
+      this.trackLocalSharedThread(threadId, {
         reason: "local_follow",
-        notify: true,
+        signal: "thread_started",
       });
       this.pendingThreadFollowId = null;
       return;
@@ -2013,7 +2185,15 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       trackedTurn.origin === "local" &&
       trackedTurn.threadId !== this.sharedThreadId
     ) {
-      this.pendingThreadFollowId = trackedTurn.threadId;
+      if (!this.activeTurn || this.activeTurn.threadId === trackedTurn.threadId) {
+        this.trackLocalSharedThread(trackedTurn.threadId, {
+          reason: "local_turn",
+          signal: "turn_started",
+        });
+        this.pendingThreadFollowId = null;
+      } else {
+        this.pendingThreadFollowId = trackedTurn.threadId;
+      }
     }
 
     if (!this.activeTurn) {
@@ -2042,6 +2222,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
+    this.trackLocalSharedThread(trackedTurn.threadId, {
+      reason: "local_turn",
+      signal: "user_message",
+    });
     this.mirroredUserInputTurnIds.add(trackedTurn.turnId);
     this.emit({
       type: "mirrored_user_input",

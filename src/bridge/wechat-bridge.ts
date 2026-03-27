@@ -57,6 +57,17 @@ type ActiveTask = {
   inputPreview: string;
 };
 
+type WechatSendContext =
+  | "message"
+  | "notice"
+  | "approval_required"
+  | "mirrored_user_input"
+  | "session_switched"
+  | "thread_switched"
+  | "task_failed"
+  | "fatal_error"
+  | "inbound_error";
+
 const POLL_RETRY_BASE_MS = 1_000;
 const POLL_RETRY_MAX_MS = 30_000;
 const PARENT_PROCESS_POLL_MS = 5_000;
@@ -90,6 +101,14 @@ function isPidAlive(pid: number): boolean {
 
 export function formatUserFacingBridgeFatalError(message: string): string {
   return `Bridge error: ${message.replace(/\s+Recent app-server log:.*$/s, "").trim()}`;
+}
+
+export function formatWechatSendFailureLogEntry(params: {
+  context: WechatSendContext;
+  recipientId: string;
+  error: unknown;
+}): string {
+  return `wechat_send_failed: context=${params.context} recipient=${params.recipientId} error=${truncatePreview(describeWechatTransportError(params.error), 400)}`;
 }
 
 export function shouldWatchParentProcess(options: {
@@ -261,9 +280,20 @@ async function main(): Promise<void> {
     return run;
   };
 
-  const queueWechatMessage = (senderId: string, text: string) => {
+  const queueWechatMessage = (
+    senderId: string,
+    text: string,
+    context: WechatSendContext = "message",
+  ) => {
     return queueWechatTextAction(() => transport.sendText(senderId, text)).catch((err) => {
-      logError(`Failed to send WeChat reply: ${describeWechatTransportError(err)}`);
+      logError(`Failed to send WeChat ${context}: ${describeWechatTransportError(err)}`);
+      stateStore.appendLog(
+        formatWechatSendFailureLogEntry({
+          context,
+          recipientId: senderId,
+          error: err,
+        }),
+      );
     });
   };
 
@@ -487,6 +517,7 @@ async function main(): Promise<void> {
           await queueWechatMessage(
             message.senderId,
             isUserFacingShellRejection ? errorText : `Bridge error: ${errorText}`,
+            "inbound_error",
           );
         }
         if (nextTask) {
@@ -558,7 +589,11 @@ function wireAdapterEvents(params: {
   stateStore: BridgeStateStore;
   outputBatcher: OutputBatcher;
   queueWechatAttachmentAction: <T>(action: () => Promise<T>) => Promise<T>;
-  queueWechatMessage: (senderId: string, text: string) => Promise<void>;
+  queueWechatMessage: (
+    senderId: string,
+    text: string,
+    context?: WechatSendContext,
+  ) => Promise<void>;
   getActiveTask: () => ActiveTask | null;
   clearActiveTask: () => void;
   updateLastOutputAt: () => void;
@@ -632,7 +667,7 @@ function wireAdapterEvents(params: {
         updateLastOutputAt();
         stateStore.appendLog(`${event.level}_notice: ${truncatePreview(event.text)}`);
         void outputBatcher.flushNow().then(async () => {
-          await queueWechatMessage(authorizedUserId, event.text);
+          await queueWechatMessage(authorizedUserId, event.text, "notice");
         });
         break;
       case "approval_required":
@@ -649,6 +684,7 @@ function wireAdapterEvents(params: {
           await queueWechatMessage(
             authorizedUserId,
             formatApprovalMessage(pending, adapterState),
+            "approval_required",
           );
         });
         break;
@@ -658,6 +694,7 @@ function wireAdapterEvents(params: {
           await queueWechatMessage(
             authorizedUserId,
             formatMirroredUserInputMessage(options.adapter, event.text),
+            "mirrored_user_input",
           );
         });
         break;
@@ -674,6 +711,7 @@ function wireAdapterEvents(params: {
               source: event.source,
               reason: event.reason,
             }),
+            "session_switched",
           );
         });
         break;
@@ -690,6 +728,7 @@ function wireAdapterEvents(params: {
               source: event.source,
               reason: event.reason,
             }),
+            "thread_switched",
           );
         });
         break;
@@ -715,6 +754,7 @@ function wireAdapterEvents(params: {
           await queueWechatMessage(
             authorizedUserId,
             formatTaskFailedMessage(options.adapter, event.message),
+            "task_failed",
           );
         });
         break;
@@ -727,6 +767,7 @@ function wireAdapterEvents(params: {
           await queueWechatMessage(
             authorizedUserId,
             formatUserFacingBridgeFatalError(event.message),
+            "fatal_error",
           );
         });
         break;
@@ -763,7 +804,11 @@ async function handleInboundMessage(params: {
   options: BridgeCliOptions;
   stateStore: BridgeStateStore;
   adapter: BridgeAdapter;
-  queueWechatMessage: (senderId: string, text: string) => Promise<void>;
+  queueWechatMessage: (
+    senderId: string,
+    text: string,
+    context?: WechatSendContext,
+  ) => Promise<void>;
   outputBatcher: OutputBatcher;
 }): Promise<ActiveTask | null> {
   const { message, options, stateStore, adapter, queueWechatMessage, outputBatcher } = params;

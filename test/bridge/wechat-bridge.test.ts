@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  formatWechatSendFailureLogEntry,
   formatUserFacingBridgeFatalError,
   parseCliArgs,
   shouldWatchParentProcess,
@@ -60,5 +61,17 @@ describe("wechat-bridge cli helpers", () => {
         "codex app-server websocket closed unexpectedly. Recent app-server log: codex app-server (WebSockets) listening on: ws://127.0.0.1:12345 readyz: http://127.0.0.1:12345/readyz",
       ),
     ).toBe("Bridge error: codex app-server websocket closed unexpectedly.");
+  });
+
+  test("formatWechatSendFailureLogEntry includes the failed context and recipient", () => {
+    expect(
+      formatWechatSendFailureLogEntry({
+        context: "thread_switched",
+        recipientId: "owner@im.wechat",
+        error: new Error("HTTP 503: upstream unavailable"),
+      }),
+    ).toBe(
+      "wechat_send_failed: context=thread_switched recipient=owner@im.wechat error=Error: HTTP 503: upstream unavailable",
+    );
   });
 });
