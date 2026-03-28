@@ -135,7 +135,7 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
 
     switch (arg) {
       case "--adapter":
-        if (!next || !["codex", "claude", "shell"].includes(next)) {
+        if (!next || !["codex", "claude", "opencode", "shell"].includes(next)) {
           throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
         }
         adapter = next as BridgeAdapterKind;
@@ -198,15 +198,17 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
 function printUsageAndExit(): never {
   process.stdout.write(
     [
-      "Usage: wechat-bridge --adapter <codex|claude|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
+      "Usage: wechat-bridge --adapter <codex|claude|opencode|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
       "",
       "Examples:",
       "  wechat-bridge-codex",
       "  wechat-bridge-claude --cwd ~/work/my-project",
+      "  wechat-bridge-opencode --cwd ~/work/my-project",
       "  wechat-bridge-shell --cmd pwsh   # headless shell executor for non-interactive commands/scripts",
       "  wechat-bridge-shell --cmd bash   # headless shell executor for non-interactive commands/scripts",
       "  wechat-bridge-codex --lifecycle companion_bound",
       "  bun run bridge:codex            # repo-local development entrypoint",
+      "  bun run bridge:opencode          # repo-local development entrypoint",
       "",
     ].join("\n"),
   );
@@ -845,6 +847,13 @@ async function handleInboundMessage(params: {
         await queueWechatMessage(
           message.senderId,
           'WeChat /resume is disabled in claude mode. Use /resume directly inside "wechat-claude"; WeChat will follow the active local session.',
+        );
+        return null;
+      }
+      if (options.adapter === "opencode") {
+        await queueWechatMessage(
+          message.senderId,
+          'WeChat /resume is disabled in opencode mode. Use /resume directly inside "wechat-opencode"; WeChat will follow the active local session.',
         );
         return null;
       }

@@ -1,10 +1,18 @@
 {
   "name": "@unlinearity/cli-wechat-bridge",
   "version": "0.9.0",
-  "description": "CLI WeChat Bridge for Codex, Claude Code, and PowerShell over WeChat",
+  "description": "CLI WeChat Bridge for Codex, Claude Code, OpenCode, and PowerShell over WeChat",
   "type": "module",
   "private": true,
-  "keywords": ["wechat", "cli", "bridge", "codex", "claude", "terminal"],
+  "keywords": [
+    "wechat",
+    "cli",
+    "bridge",
+    "codex",
+    "claude",
+    "opencode",
+    "terminal"
+  ],
   "author": "UNLINEARITY",
   "license": "MIT",
   "repository": {
@@ -24,6 +32,9 @@
     "wechat-claude-start": "./bin/wechat-claude-start.mjs",
     "wechat-bridge-claude": "./bin/wechat-bridge-claude.mjs",
     "wechat-bridge-shell": "./bin/wechat-bridge-shell.mjs",
+    "wechat-bridge-opencode": "./bin/wechat-bridge-opencode.mjs",
+    "wechat-opencode": "./bin/wechat-opencode.mjs",
+    "wechat-opencode-start": "./bin/wechat-opencode-start.mjs",
     "wechat-check-update": "./bin/wechat-check-update.mjs"
   },
   "scripts": {
@@ -38,6 +49,9 @@
     "claude:companion": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter claude",
     "bridge:claude": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter claude",
     "bridge:shell": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter shell",
+    "bridge:opencode": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter opencode",
+    "opencode:start": "node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter opencode",
+    "opencode:companion": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter opencode",
     "bridge:bun": "bun src/bridge/wechat-bridge.ts",
     "test": "bun test test",
     "test:bridge": "bun test test/bridge",
@@ -48,12 +62,14 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@opencode-ai/sdk": "^1.3.2",
     "ajv-formats": "^3.0.1",
     "node-pty": "^1.1.0",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^6.0.2"
   },
   "engines": {
     "bun": ">=1.0.0",

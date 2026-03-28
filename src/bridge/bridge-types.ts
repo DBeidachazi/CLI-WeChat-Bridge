@@ -1,4 +1,4 @@
-export type BridgeAdapterKind = "codex" | "claude" | "shell";
+export type BridgeAdapterKind = "codex" | "claude" | "opencode" | "shell";
 export type BridgeLifecycleMode = "persistent" | "companion_bound";
 export type BridgeTurnOrigin = "wechat" | "local";
 export type BridgeSessionSwitchSource = BridgeTurnOrigin | "restore";

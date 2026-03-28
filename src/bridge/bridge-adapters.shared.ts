@@ -157,6 +157,11 @@ export const CLAUDE_WECHAT_WORKING_NOTICE_DELAY_MS = 12_000;
 export const DEFAULT_UNIX_SHELL_CANDIDATES = ["pwsh", "bash", "zsh", "sh"] as const;
 export const POSIX_SHELL_NAMES = new Set(["bash", "zsh", "sh", "dash", "ksh"]);
 export const CLAUDE_FLAG_SUPPORT_CACHE = new Map<string, boolean>();
+export const OPENCODE_SERVER_HOST = "127.0.0.1";
+export const OPENCODE_SERVER_READY_TIMEOUT_MS = 10_000;
+export const OPENCODE_SSE_RECONNECT_DELAY_MS = 2_000;
+export const OPENCODE_SESSION_IDLE_SETTLE_MS = 1_500;
+export const OPENCODE_WECHAT_WORKING_NOTICE_DELAY_MS = 12_000;
 
 export type ShellRuntimeFamily = "powershell" | "posix";
 
@@ -241,6 +246,8 @@ export function getLocalCompanionCommandName(kind: BridgeAdapterKind): string {
       return "wechat-codex";
     case "claude":
       return "wechat-claude";
+    case "opencode":
+      return "wechat-opencode";
     default:
       return "local companion";
   }
@@ -839,7 +846,7 @@ export function buildCliEnvironment(
   const sourceEnv = options.env ?? (process.env as Record<string, string | undefined>);
   const platform = options.platform ?? process.platform;
 
-  if (kind === "codex" || kind === "claude") {
+  if (kind === "codex" || kind === "claude" || kind === "opencode") {
     if (platform !== "win32") {
       return applyLoopbackNoProxy({
         ...copyDefinedEnv(sourceEnv),
@@ -1010,7 +1017,7 @@ export async function reserveLocalPort(): Promise<number> {
     server.listen(0, CODEX_APP_SERVER_HOST, () => {
       const address = server.address();
       if (!address || typeof address === "string") {
-        server.close(() => reject(new Error("Could not reserve a local Codex app-server port.")));
+        server.close(() => reject(new Error("Could not reserve a local app-server port.")));
         return;
       }
 
@@ -1055,7 +1062,7 @@ export async function waitForTcpPort(
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  throw new Error(`Timed out waiting for Codex app-server on ${host}:${port}.`);
+  throw new Error(`Timed out waiting for app-server on ${host}:${port}.`);
 }
 
 export async function delay(ms: number): Promise<void> {
@@ -1481,11 +1488,14 @@ export function resolveSpawnTarget(
   }
 
   const resolved = resolveCommandPath(trimmed, platform, env) ?? trimmed;
-  if (platform !== "win32" || (kind !== "codex" && kind !== "claude")) {
+  if (platform !== "win32" || (kind !== "codex" && kind !== "claude" && kind !== "opencode")) {
     return { file: resolved, args: [...forwardArgs] };
   }
 
-  const bundledExe = resolveBundledWindowsExe(kind, resolved);
+  const bundledExe =
+    kind === "codex" || kind === "claude"
+      ? resolveBundledWindowsExe(kind, resolved)
+      : undefined;
   if (bundledExe) {
     return { file: bundledExe, args: [...forwardArgs] };
   }

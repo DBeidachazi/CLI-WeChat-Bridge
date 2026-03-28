@@ -76,7 +76,7 @@ function normalizeEndpoint(value: unknown): LocalCompanionEndpoint | null {
 
   const record = value as Record<string, unknown>;
   const kind =
-    record.kind === "codex" || record.kind === "claude" || record.kind === "shell"
+    record.kind === "codex" || record.kind === "claude" || record.kind === "opencode" || record.kind === "shell"
       ? record.kind
       : "codex";
   const sharedSessionId =
@@ -107,7 +107,7 @@ function normalizeEndpoint(value: unknown): LocalCompanionEndpoint | null {
     profile: typeof record.profile === "string" ? record.profile : undefined,
     sharedSessionId,
     sharedThreadId:
-      kind === "codex"
+      kind === "codex" || kind === "opencode"
         ? sharedSessionId
         : typeof record.sharedThreadId === "string"
           ? record.sharedThreadId
@@ -129,7 +129,7 @@ export function writeLocalCompanionEndpoint(endpoint: LocalCompanionEndpoint): v
   const payload: LocalCompanionEndpoint = {
     ...endpoint,
     sharedThreadId:
-      endpoint.kind === "codex"
+      endpoint.kind === "codex" || endpoint.kind === "opencode"
         ? endpoint.sharedSessionId ?? endpoint.sharedThreadId
         : undefined,
   };

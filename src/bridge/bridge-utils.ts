@@ -799,6 +799,21 @@ export function formatSessionSwitchMessage(params: {
     }
   }
 
+  if (params.adapter === "opencode") {
+    switch (params.reason) {
+      case "local_follow":
+      case "local_session_fallback":
+      case "local_turn":
+        return `OpenCode session switched to ${shortSessionId} from the local terminal.`;
+      case "wechat_resume":
+        return `OpenCode session switched to ${shortSessionId} from WeChat.`;
+      case "startup_restore":
+        return `OpenCode restored shared session ${shortSessionId} on startup.`;
+      default:
+        return `OpenCode session switched to ${shortSessionId}.`;
+    }
+  }
+
   switch (params.reason) {
     case "local_follow":
     case "local_session_fallback":
@@ -835,10 +850,12 @@ export function formatResumeSessionList(params: {
   if (candidates.length === 0) {
     return adapter === "codex"
       ? "No saved Codex threads were found for this working directory."
-      : "No saved sessions were found for this working directory.";
+      : adapter === "opencode"
+        ? "No saved OpenCode sessions were found for this working directory."
+        : "No saved sessions were found for this working directory.";
   }
 
-  const title = adapter === "codex" ? "Recent Codex threads:" : "Recent sessions:";
+  const title = adapter === "codex" ? "Recent Codex threads:" : adapter === "opencode" ? "Recent OpenCode sessions:" : "Recent sessions:";
   const resumeTargetLabel = adapter === "codex" ? "threadId" : "sessionId";
   return [
     title,
@@ -875,7 +892,9 @@ export function formatMirroredUserInputMessage(
       ? "Local Codex input"
       : adapter === "claude"
         ? "Local Claude input"
-        : "Local input";
+        : adapter === "opencode"
+          ? "Local OpenCode input"
+          : "Local input";
   return `${label}:\n${truncatePreview(text, 500)}`;
 }
 
@@ -883,10 +902,11 @@ export function formatFinalReplyMessage(
   adapter: BridgeAdapterKind,
   text: string,
 ): string {
-  if (adapter === "claude" || adapter === "codex") {
+  if (adapter === "claude" || adapter === "codex" || adapter === "opencode") {
     return text;
   }
-  const label = adapter === "codex" ? "Codex" : adapter === "claude" ? "Claude" : adapter;
+  // After the early return above, only "shell" remains.
+  const label = (adapter as string) === "codex" ? "Codex" : (adapter as string) === "claude" ? "Claude" : (adapter as string) === "opencode" ? "OpenCode" : adapter;
   return `${label} final reply:\n${text}`;
 }
 
@@ -1012,7 +1032,7 @@ export function formatTaskFailedMessage(
   adapter: BridgeAdapterKind,
   text: string,
 ): string {
-  const label = adapter === "codex" ? "Codex" : adapter === "claude" ? "Claude" : adapter;
+  const label = adapter === "codex" ? "Codex" : adapter === "claude" ? "Claude" : adapter === "opencode" ? "OpenCode" : adapter;
   return `${label} task failed:\n${text}`;
 }
 

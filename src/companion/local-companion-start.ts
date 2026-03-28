@@ -64,7 +64,8 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
         [
           "Usage: wechat-codex-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "       wechat-claude-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
-          "       local-companion-start [--adapter <codex|claude>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
+          "       wechat-opencode-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
+          "       local-companion-start [--adapter <codex|claude|opencode>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "",
           "Starts or reuses a transient Codex or Claude bridge for the current directory, waits for the local companion endpoint, then opens the visible local companion.",
           "Closing the visible local companion also stops that transient bridge.",
@@ -75,7 +76,7 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
     }
 
     if (arg === "--adapter") {
-      if (!next || !["codex", "claude"].includes(next)) {
+      if (!next || !["codex", "claude", "opencode"].includes(next)) {
         throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
       }
       adapter = next as LocalCompanionLaunchAdapter;
