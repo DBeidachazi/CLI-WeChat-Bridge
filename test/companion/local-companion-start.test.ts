@@ -80,7 +80,7 @@ describe("local-companion-start helpers", () => {
     ]);
   });
 
-  test("buildBackgroundBridgeArgs keeps the OpenCode bridge persistent", () => {
+  test("buildBackgroundBridgeArgs keeps the OpenCode bridge companion_bound", () => {
     const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
       adapter: "opencode",
       cwd: path.resolve("./tmp/project"),
@@ -96,7 +96,7 @@ describe("local-companion-start helpers", () => {
       "--cwd",
       path.resolve("./tmp/project"),
       "--lifecycle",
-      "persistent",
+      "companion_bound",
     ]);
   });
 

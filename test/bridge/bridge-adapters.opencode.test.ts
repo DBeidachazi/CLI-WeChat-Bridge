@@ -35,25 +35,29 @@ describe("OpenCode adapter factory", () => {
     expect(adapter).toBeInstanceOf(OpenCodeServerAdapter);
   });
 
-  test("creates an OpenCodeServerAdapter in companion render mode", () => {
-    const adapter = createBridgeAdapter({
-      kind: "opencode",
-      command: "opencode",
-      cwd: process.cwd(),
-      renderMode: "companion",
-    });
-
-    expect(adapter).toBeInstanceOf(OpenCodeServerAdapter);
+  test("rejects legacy companion render mode", () => {
+    expect(() =>
+      createBridgeAdapter({
+        kind: "opencode",
+        command: "opencode",
+        cwd: process.cwd(),
+        renderMode: "companion",
+      }),
+    ).toThrow(
+      'OpenCode only supports renderMode "embedded". Start the visible panel with "wechat-opencode".',
+    );
   });
 
-  test("creates a LocalCompanionProxyAdapter without renderMode", () => {
-    const adapter = createBridgeAdapter({
-      kind: "opencode",
-      command: "opencode",
-      cwd: process.cwd(),
-    });
-
-    expect(adapter).not.toBeInstanceOf(OpenCodeServerAdapter);
+  test("rejects missing render mode", () => {
+    expect(() =>
+      createBridgeAdapter({
+        kind: "opencode",
+        command: "opencode",
+        cwd: process.cwd(),
+      }),
+    ).toThrow(
+      'OpenCode only supports renderMode "embedded". Start the visible panel with "wechat-opencode".',
+    );
   });
 
   test("creates an OpenCodeServerAdapter that accepts initialSharedSessionId option", () => {
@@ -61,7 +65,7 @@ describe("OpenCode adapter factory", () => {
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
-      renderMode: "companion",
+      renderMode: "embedded",
       initialSharedSessionId: "session-initial-123",
     });
 
@@ -366,6 +370,96 @@ describe("OpenCode session.status handling", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  session.error handling                                             */
+/* ------------------------------------------------------------------ */
+
+describe("OpenCode session.error handling", () => {
+  test("fails the tracked turn for non-abort session errors", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; message?: string; status?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; message?: string; status?: string });
+    });
+    const internal = adapter as unknown as {
+      state: { status: string; activeTurnOrigin?: string };
+      hasAcceptedInput: boolean;
+      currentPreview: string;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+    internal.hasAcceptedInput = true;
+    internal.currentPreview = "Run the failing test suite";
+
+    internal.handleSseEvent({
+      type: "session.error",
+      properties: {
+        sessionID: "session_error_1",
+        error: {
+          name: "APIError",
+          data: { message: "Provider request failed" },
+        },
+      },
+    });
+
+    expect(internal.state.status).toBe("idle");
+    expect(internal.state.activeTurnOrigin).toBeUndefined();
+    expect(internal.hasAcceptedInput).toBe(false);
+    expect(internal.currentPreview).toBe("(idle)");
+    expect(events.filter((event) => event.type === "task_failed")).toEqual([
+      expect.objectContaining({
+        message: "Provider request failed",
+      }),
+    ]);
+  });
+
+  test("settles aborted turns without emitting task_failed", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string });
+    });
+    const internal = adapter as unknown as {
+      state: { status: string; activeTurnOrigin?: string };
+      hasAcceptedInput: boolean;
+      currentPreview: string;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.state.status = "busy";
+    internal.state.activeTurnOrigin = "wechat";
+    internal.hasAcceptedInput = true;
+    internal.currentPreview = "Cancel the current turn";
+
+    internal.handleSseEvent({
+      type: "session.error",
+      properties: {
+        sessionID: "session_abort_1",
+        error: {
+          name: "MessageAbortedError",
+          data: { message: "Session aborted" },
+        },
+      },
+    });
+
+    expect(internal.state.status).toBe("idle");
+    expect(internal.state.activeTurnOrigin).toBeUndefined();
+    expect(internal.hasAcceptedInput).toBe(false);
+    expect(internal.currentPreview).toBe("(idle)");
+    expect(events.filter((event) => event.type === "task_failed")).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  permission.updated handling                                        */
 /* ------------------------------------------------------------------ */
 
@@ -528,7 +622,13 @@ describe("OpenCode session.created handling", () => {
       events.push(event as unknown as { type: string; sessionId?: string; source?: string });
     });
     const internal = adapter as unknown as {
-      state: { sharedSessionId?: string; activeRuntimeSessionId?: string; lastSessionSwitchSource?: string; lastSessionSwitchReason?: string };
+      state: {
+        sharedSessionId?: string;
+        sharedThreadId?: string;
+        activeRuntimeSessionId?: string;
+        lastSessionSwitchSource?: string;
+        lastSessionSwitchReason?: string;
+      };
       activeSessionId: string | null;
       handleSseEvent(event: { type: string; properties?: unknown }): void;
     };
@@ -541,6 +641,7 @@ describe("OpenCode session.created handling", () => {
 
     expect(internal.activeSessionId).toBe("session_new_1");
     expect(internal.state.sharedSessionId).toBe("session_new_1");
+    expect(internal.state.sharedThreadId).toBe("session_new_1");
     expect(internal.state.activeRuntimeSessionId).toBe("session_new_1");
     expect(internal.state.lastSessionSwitchSource).toBe("local");
     expect(internal.state.lastSessionSwitchReason).toBe("local_follow");
@@ -587,7 +688,7 @@ describe("OpenCode session.created handling", () => {
       events.push(event as unknown as { type: string; sessionId?: string; source?: string });
     });
     const internal = adapter as unknown as {
-      state: { sharedSessionId?: string; activeRuntimeSessionId?: string };
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
       activeSessionId: string | null;
       handleSseEvent(event: { type: string; properties?: unknown }): void;
     };
@@ -601,8 +702,115 @@ describe("OpenCode session.created handling", () => {
 
     expect(internal.activeSessionId).toBe("session_new_2");
     expect(internal.state.sharedSessionId).toBe("session_new_2");
+    expect(internal.state.sharedThreadId).toBe("session_new_2");
     expect(internal.state.activeRuntimeSessionId).toBe("session_new_2");
     expect(events.filter((e) => e.type === "session_switched")).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  local TUI tracking                                                 */
+/* ------------------------------------------------------------------ */
+
+describe("OpenCode local TUI tracking", () => {
+  test("mirrors a submitted local prompt as a local turn", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; text?: string; origin?: string; status?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; text?: string; origin?: string; status?: string });
+    });
+    const internal = adapter as unknown as {
+      state: { status: string; activeTurnOrigin?: string; lastInputAt?: string };
+      currentPreview: string;
+      hasAcceptedInput: boolean;
+      pendingLocalPrompt: string;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.handleSseEvent({ type: "tui.prompt.append", properties: { text: "Review " } });
+    internal.handleSseEvent({ type: "tui.prompt.append", properties: { text: "the bridge flow" } });
+    internal.handleSseEvent({ type: "tui.command.execute", properties: { command: "prompt.submit" } });
+
+    expect(internal.pendingLocalPrompt).toBe("");
+    expect(internal.hasAcceptedInput).toBe(true);
+    expect(internal.currentPreview).toBe("Review the bridge flow");
+    expect(internal.state.status).toBe("busy");
+    expect(internal.state.activeTurnOrigin).toBe("local");
+    expect(typeof internal.state.lastInputAt).toBe("string");
+
+    const mirroredEvents = events.filter((event) => event.type === "mirrored_user_input");
+    expect(mirroredEvents).toHaveLength(1);
+    expect(mirroredEvents[0]).toMatchObject({
+      text: "Review the bridge flow",
+      origin: "local",
+    });
+  });
+
+  test("clears the buffered local prompt before submit", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string });
+    });
+    const internal = adapter as unknown as {
+      state: { status: string; activeTurnOrigin?: string };
+      pendingLocalPrompt: string;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.handleSseEvent({ type: "tui.prompt.append", properties: { text: "temporary draft" } });
+    internal.handleSseEvent({ type: "tui.command.execute", properties: { command: "prompt.clear" } });
+    internal.handleSseEvent({ type: "tui.command.execute", properties: { command: "prompt.submit" } });
+
+    expect(internal.pendingLocalPrompt).toBe("");
+    expect(internal.state.status).toBe("stopped");
+    expect(internal.state.activeTurnOrigin).toBeUndefined();
+    expect(events).toHaveLength(0);
+  });
+
+  test("tracks local TUI session selections as local session switches", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "tui.session.select",
+      properties: { sessionID: "session_selected_local" },
+    });
+
+    expect(internal.activeSessionId).toBe("session_selected_local");
+    expect(internal.state.sharedSessionId).toBe("session_selected_local");
+    expect(internal.state.sharedThreadId).toBe("session_selected_local");
+    expect(internal.state.activeRuntimeSessionId).toBe("session_selected_local");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_local",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
   });
 });
 

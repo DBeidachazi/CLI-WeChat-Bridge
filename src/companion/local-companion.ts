@@ -17,12 +17,12 @@ function log(adapter: string, message: string): void {
 }
 
 type LocalCompanionCliOptions = {
-  adapter: "codex" | "claude" | "opencode";
+  adapter: "codex" | "claude";
   cwd: string;
 };
 
 function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
-  let adapter: "codex" | "claude" | "opencode" | null = null;
+  let adapter: "codex" | "claude" | null = null;
   let cwd = process.cwd();
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -32,7 +32,7 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
     if (arg === "--help" || arg === "-h") {
       process.stdout.write(
         [
-          "Usage: local-companion --adapter <codex|claude|opencode> [--cwd <path>]",
+          "Usage: local-companion --adapter <codex|claude> [--cwd <path>]",
           "",
           'Starts the visible local companion and connects it to the matching running bridge for the current directory.',
           "",
@@ -42,10 +42,10 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
     }
 
     if (arg === "--adapter") {
-      if (!next || !["codex", "claude", "opencode"].includes(next)) {
+      if (!next || !["codex", "claude"].includes(next)) {
         throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
       }
-      adapter = next as "codex" | "claude" | "opencode";
+      adapter = next as "codex" | "claude";
       i += 1;
       continue;
     }
@@ -63,7 +63,7 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
   }
 
   if (!adapter) {
-    throw new Error("Missing required --adapter <codex|claude|opencode>");
+    throw new Error("Missing required --adapter <codex|claude>");
   }
 
   return { adapter, cwd };

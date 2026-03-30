@@ -14,6 +14,12 @@ export const BOT_TYPE = "3";
 export const CHANNEL_DATA_DIR = process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR?.trim()
   ? path.resolve(process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR.trim())
   : path.join(os.homedir(), ".claude", "channels", "wechat");
+export const GLOBAL_CHANNEL_DATA_DIR = path.join(
+  os.homedir(),
+  ".claude",
+  "channels",
+  "wechat",
+);
 
 export const CREDENTIALS_FILE = path.join(CHANNEL_DATA_DIR, "account.json");
 export const SYNC_BUF_FILE = path.join(CHANNEL_DATA_DIR, "sync_buf.txt");
@@ -29,6 +35,10 @@ export const CODEX_PANEL_ENDPOINT_FILE = path.join(
   "codex-panel-endpoint.json",
 );
 export const WORKSPACES_DIR = path.join(CHANNEL_DATA_DIR, "workspaces");
+export const INBOUND_MESSAGE_CLAIMS_DIR = path.join(
+  GLOBAL_CHANNEL_DATA_DIR,
+  "inbound-message-claims",
+);
 
 export type WorkspaceChannelPaths = {
   workspaceDir: string;

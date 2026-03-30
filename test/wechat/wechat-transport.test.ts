@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   assertMediaUploadSizeAllowed,
+  buildInboundMessageClaimPath,
+  clearInboundMessageClaims,
   classifyWechatTransportError,
   describeWechatTransportError,
   formatByteSize,
   resolveMediaUploadLimitBytes,
+  tryClaimInboundMessage,
 } from "../../src/wechat/wechat-transport.ts";
 
 describe("wechat upload limits", () => {
@@ -77,5 +83,47 @@ describe("wechat upload limits", () => {
       retryable: false,
       statusCode: 401,
     });
+  });
+
+  test("claims each inbound message key only once across processes", () => {
+    const claimsDir = fs.mkdtempSync(path.join(os.tmpdir(), "wechat-claims-"));
+    const scopedMessageKey = "account-1|sender|client|123|ctx";
+
+    try {
+      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(true);
+      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(false);
+      expect(fs.existsSync(buildInboundMessageClaimPath(scopedMessageKey, claimsDir))).toBe(true);
+    } finally {
+      clearInboundMessageClaims(claimsDir);
+    }
+  });
+
+  test("reclaims stale inbound message claims after the TTL expires", () => {
+    const claimsDir = fs.mkdtempSync(path.join(os.tmpdir(), "wechat-claims-"));
+    const scopedMessageKey = "account-1|sender|client|456|ctx";
+    const nowMs = Date.now();
+
+    try {
+      expect(
+        tryClaimInboundMessage(scopedMessageKey, {
+          claimsDir,
+          nowMs,
+          ttlMs: 1000,
+        }),
+      ).toBe(true);
+
+      const claimPath = buildInboundMessageClaimPath(scopedMessageKey, claimsDir);
+      fs.utimesSync(claimPath, new Date(nowMs - 5000), new Date(nowMs - 5000));
+
+      expect(
+        tryClaimInboundMessage(scopedMessageKey, {
+          claimsDir,
+          nowMs,
+          ttlMs: 1000,
+        }),
+      ).toBe(true);
+    } finally {
+      clearInboundMessageClaims(claimsDir);
+    }
   });
 });

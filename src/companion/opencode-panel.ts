@@ -35,6 +35,7 @@ function parseCliArgs(argv: string[]): OpencodePanelCliOptions {
           "Usage: wechat-opencode [--cwd <path>]",
           "",
           'Starts the visible OpenCode panel and attaches it to the running "wechat-bridge-opencode" instance for the current directory.',
+          'Use "wechat-opencode-start" when you want to bootstrap the bridge and panel together.',
           "",
         ].join("\n"),
       );
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
   const endpoint = readLocalCompanionEndpoint(options.cwd);
   if (!endpoint || endpoint.kind !== "opencode") {
     throw new Error(
-      `No active OpenCode bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-opencode" in that directory first.`,
+      `No active OpenCode bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-opencode" in that directory first, or use "wechat-opencode-start" to bootstrap both.`,
     );
   }
 

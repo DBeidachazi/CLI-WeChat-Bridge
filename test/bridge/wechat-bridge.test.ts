@@ -87,7 +87,7 @@ describe("wechat-bridge cli helpers", () => {
         isUserFacingShellRejection: false,
       }),
     ).toBe(
-      'OpenCode panel is not connected for bridge workspace:\nC:\\Users\\unlin\nRun "wechat-opencode" in that directory, or run it in your target project to replace this bridge.',
+      'OpenCode panel is not connected for bridge workspace:\nC:\\Users\\unlin\nRun "wechat-opencode" in that directory to reconnect the current panel, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.',
     );
   });
 

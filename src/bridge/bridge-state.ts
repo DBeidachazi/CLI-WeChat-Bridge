@@ -3,7 +3,6 @@ import fs from "node:fs";
 import {
   BRIDGE_LOCK_FILE,
   BRIDGE_LOG_FILE,
-  BRIDGE_STATE_FILE,
   ensureWorkspaceChannelDir,
   ensureChannelDataDir,
 } from "../wechat/channel-config.ts";
@@ -158,12 +157,18 @@ export function shouldAutoReclaimBridgeLock(
   lock: BridgeLockPayload,
   isProcessAlive: (pid: number) => boolean = isPidAlive,
 ): boolean {
-  return (
-    (lock.lifecycle === "companion_bound" ||
-      (lock.legacyLifecycleFallback === true && lock.adapter === "codex")) &&
-    lock.parentPid > 1 &&
-    !isProcessAlive(lock.parentPid)
-  );
+  if (
+    lock.lifecycle === "companion_bound" ||
+    (lock.legacyLifecycleFallback === true && lock.adapter === "codex")
+  ) {
+    return lock.parentPid > 1 && !isProcessAlive(lock.parentPid);
+  }
+
+  // For persistent lifecycle (e.g. opencode), reclaim the lock if the
+  // lock-holding process is no longer alive.  This prevents stale locks
+  // from permanently blocking subsequent bridge starts when the process
+  // was force-killed (SIGKILL, Task Manager, OOM, etc.).
+  return !isProcessAlive(lock.pid);
 }
 
 export function evaluateBridgeRuntimeOwnership(params: {
@@ -469,18 +474,12 @@ export class BridgeStateStore {
 
   private readStateFile(): Partial<BridgeState> | null {
     try {
-      if (fs.existsSync(this.stateFilePath)) {
-        return JSON.parse(
-          fs.readFileSync(this.stateFilePath, "utf-8"),
-        ) as Partial<BridgeState>;
-      }
-
-      if (!fs.existsSync(BRIDGE_STATE_FILE)) {
+      if (!fs.existsSync(this.stateFilePath)) {
         return null;
       }
 
       return JSON.parse(
-        fs.readFileSync(BRIDGE_STATE_FILE, "utf-8"),
+        fs.readFileSync(this.stateFilePath, "utf-8"),
       ) as Partial<BridgeState>;
     } catch {
       return null;

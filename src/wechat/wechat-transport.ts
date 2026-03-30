@@ -7,6 +7,7 @@ import {
   CONTEXT_CACHE_FILE,
   CREDENTIALS_FILE,
   ensureChannelDataDir,
+  INBOUND_MESSAGE_CLAIMS_DIR,
   migrateLegacyChannelFiles,
   SYNC_BUF_FILE,
 } from "./channel-config.ts";
@@ -20,6 +21,7 @@ const BYTES_PER_MB = 1024 * 1024;
 const SEND_TIMEOUT_MS = 15_000;
 const CDN_MAX_RETRIES = 3;
 const ERROR_CAUSE_DEPTH_LIMIT = 4;
+const INBOUND_MESSAGE_CLAIM_TTL_MS = 10 * 60 * 1000;
 
 const MSG_TYPE_USER = 1;
 const MSG_TYPE_BOT = 2;
@@ -655,6 +657,96 @@ function buildMessageKey(message: WeixinMessage): string {
   ].join("|");
 }
 
+function buildScopedMessageClaimKey(accountId: string, messageKey: string): string {
+  return `${accountId}|${messageKey}`;
+}
+
+export function buildInboundMessageClaimPath(
+  messageKey: string,
+  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR,
+): string {
+  const fileName = `${crypto.createHash("sha1").update(messageKey).digest("hex")}.json`;
+  return path.join(claimsDir, fileName);
+}
+
+export function clearInboundMessageClaims(
+  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR,
+): void {
+  try {
+    fs.rmSync(claimsDir, { recursive: true, force: true });
+  } catch {
+    // Best effort cleanup.
+  }
+}
+
+export function tryClaimInboundMessage(
+  messageKey: string,
+  options: {
+    claimsDir?: string;
+    nowMs?: number;
+    ttlMs?: number;
+  } = {},
+): boolean {
+  if (!messageKey) {
+    return false;
+  }
+
+  const claimsDir = options.claimsDir ?? INBOUND_MESSAGE_CLAIMS_DIR;
+  const nowMs = options.nowMs ?? Date.now();
+  const ttlMs = options.ttlMs ?? INBOUND_MESSAGE_CLAIM_TTL_MS;
+  const claimPath = buildInboundMessageClaimPath(messageKey, claimsDir);
+
+  const attemptClaim = (): boolean => {
+    fs.mkdirSync(claimsDir, { recursive: true });
+    const handle = fs.openSync(claimPath, "wx");
+    try {
+      fs.writeFileSync(
+        handle,
+        JSON.stringify(
+          {
+            key: messageKey,
+            claimedAt: new Date(nowMs).toISOString(),
+            pid: process.pid,
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+    } finally {
+      fs.closeSync(handle);
+    }
+    return true;
+  };
+
+  try {
+    return attemptClaim();
+  } catch (error) {
+    const code =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : "";
+    if (code !== "EEXIST") {
+      return true;
+    }
+  }
+
+  try {
+    const stat = fs.statSync(claimPath);
+    if (Number.isFinite(stat.mtimeMs) && nowMs - stat.mtimeMs > ttlMs) {
+      fs.rmSync(claimPath, { force: true });
+      return attemptClaim();
+    }
+  } catch {
+    return attemptClaim();
+  }
+
+  return false;
+}
+
 function normalizeSender(senderId: string): string {
   return senderId.split("@")[0] || senderId;
 }
@@ -711,6 +803,7 @@ export class WeChatTransport {
   resetSyncState(options: ResetSyncOptions = {}): string {
     this.clearSyncBuffer();
     this.clearRecentMessages();
+    clearInboundMessageClaims();
 
     if (options.clearContextCache) {
       this.clearContextTokenCache();
@@ -758,6 +851,9 @@ export class WeChatTransport {
 
       const messageKey = buildMessageKey(rawMessage);
       if (!this.rememberMessage(messageKey)) {
+        continue;
+      }
+      if (!tryClaimInboundMessage(buildScopedMessageClaimKey(account.accountId, messageKey))) {
         continue;
       }
 

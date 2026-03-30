@@ -194,7 +194,10 @@ async function main() {
         console.log("start the WeChat bridge from any directory with:");
         console.log("  wechat-bridge-codex");
         console.log("  wechat-codex         # start this in a second terminal in the same directory");
+        console.log("  wechat-bridge-opencode");
+        console.log("  wechat-opencode      # start this in a second terminal in the same directory");
         console.log("  wechat-bridge-claude");
+        console.log("  wechat-claude        # start this in a second terminal in the same directory");
         console.log("  wechat-bridge-shell");
         console.log("  On Linux/macOS, wechat-bridge-shell defaults to pwsh, then bash, zsh, or sh.");
         console.log("  Shell mode is a headless remote executor for non-interactive commands and scripts.");
@@ -202,7 +205,11 @@ async function main() {
         console.log("Repo-local development entrypoints are still available:");
         console.log("  bun run bridge:codex");
         console.log("  bun run codex:panel");
+        console.log("  bun run bridge:opencode");
+        console.log("  bun run opencode:panel");
+        console.log("  bun run opencode:start");
         console.log("  bun run bridge:claude");
+        console.log("  bun run claude:companion");
         console.log("  bun run bridge:shell");
         console.log();
         console.log("Legacy MCP server entrypoint:");

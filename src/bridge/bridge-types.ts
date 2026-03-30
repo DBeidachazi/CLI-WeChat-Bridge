@@ -124,7 +124,7 @@ export type BridgeEvent =
     }
   | {
       type: "approval_required";
-      request: ApprovalRequest;
+      request: ApprovalRequest | PendingApproval;
       timestamp: string;
     }
   | {

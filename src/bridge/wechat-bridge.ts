@@ -10,7 +10,10 @@ import { delay } from "./bridge-adapters.shared.ts";
 import { forwardWechatFinalReply } from "./bridge-final-reply.ts";
 import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 import { BridgeStateStore } from "./bridge-state.ts";
+import { reapOrphanedOpencodeProcesses, reapPeerBridgeProcesses } from "./bridge-process-reaper.ts";
+import { clearLocalCompanionEndpoint } from "../companion/local-companion-link.ts";
 import type {
+  ApprovalRequest,
   BridgeAdapter,
   BridgeAdapterKind,
   BridgeEvent,
@@ -141,8 +144,8 @@ export function formatUserFacingInboundError(params: {
     /opencode companion is not connected/i.test(errorText)
   ) {
     return cwd
-      ? `OpenCode panel is not connected for bridge workspace:\n${cwd}\nRun "wechat-opencode" in that directory, or run it in your target project to replace this bridge.`
-      : 'OpenCode panel is not connected. Start "wechat-opencode" in this directory, then retry.';
+      ? `OpenCode panel is not connected for bridge workspace:\n${cwd}\nRun "wechat-opencode" in that directory to reconnect the current panel, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.`
+      : 'OpenCode panel is not connected. Start "wechat-opencode" in this directory to reconnect it, then retry.';
   }
 
   return `Bridge error: ${errorText}`;
@@ -165,6 +168,18 @@ export function shouldWatchParentProcess(options: {
     options.startupParentPid > 1 &&
     (options.attachedToTerminal || options.lifecycle === "companion_bound")
   );
+}
+
+function toPendingApproval(request: ApprovalRequest | PendingApproval): PendingApproval {
+  if (typeof (request as PendingApproval).code === "string") {
+    return request as PendingApproval;
+  }
+
+  return {
+    ...request,
+    code: buildOneTimeCode(),
+    createdAt: nowIso(),
+  };
 }
 
 export function parseCliArgs(argv: string[]): BridgeCliOptions {
@@ -290,6 +305,21 @@ async function main(): Promise<void> {
     ...options,
     authorizedUserId: credentials.userId,
   });
+  const reapedPeerPids = await reapPeerBridgeProcesses({
+    logger: (message) => stateStore.appendLog(message),
+  });
+  if (reapedPeerPids.length > 0) {
+    log(`Reaped ${reapedPeerPids.length} stale bridge process(es): ${reapedPeerPids.join(", ")}`);
+  }
+
+  if (options.adapter === "opencode") {
+    const reapedOpencodePids = await reapOrphanedOpencodeProcesses({
+      logger: (message) => stateStore.appendLog(message),
+    });
+    if (reapedOpencodePids.length > 0) {
+      log(`Reaped ${reapedOpencodePids.length} orphaned opencode process(es): ${reapedOpencodePids.join(", ")}`);
+    }
+  }
 
   let lockRehydratedLogged = false;
   const ensureRuntimeOwnership = (): boolean => {
@@ -317,6 +347,12 @@ async function main(): Promise<void> {
 
     return true;
   };
+
+  // Clear any stale endpoint left by a previous bridge for this workspace.
+  // This prevents `wechat-opencode` / `wechat-codex` from connecting to a
+  // dead server while the new bridge is still starting up.
+  clearLocalCompanionEndpoint(options.cwd);
+  stateStore.appendLog(`Cleared stale companion endpoint for ${options.cwd} before adapter start.`);
 
   const adapter = createBridgeAdapter({
     kind: options.adapter,
@@ -775,11 +811,7 @@ function wireAdapterEvents(params: {
         break;
       case "approval_required":
         void outputBatcher.flushNow().then(async () => {
-          const pending: PendingApproval = {
-            ...event.request,
-            code: buildOneTimeCode(),
-            createdAt: nowIso(),
-          };
+          const pending = toPendingApproval(event.request);
           stateStore.setPendingConfirmation(pending);
           stateStore.appendLog(
             `Approval requested (${pending.source}): ${pending.commandPreview}`,
@@ -1047,10 +1079,15 @@ async function handleInboundMessage(params: {
 
   const adapterState = adapter.getState();
   if (adapterState.status === "busy") {
-    if (options.adapter === "codex" && adapterState.activeTurnOrigin === "local") {
+    if (
+      (options.adapter === "codex" || options.adapter === "opencode") &&
+      adapterState.activeTurnOrigin === "local"
+    ) {
       await queueWechatMessage(
         message.senderId,
-        "codex is currently busy with a local terminal turn. Wait for it to finish or use /stop.",
+        `${
+          options.adapter === "opencode" ? "OpenCode" : "codex"
+        } is currently busy with a local terminal turn. Wait for it to finish or use /stop.`,
       );
       return null;
     }

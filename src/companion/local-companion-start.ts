@@ -73,7 +73,7 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
           "       local-companion-start [--adapter <codex|claude|opencode>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "",
           "Starts or reuses a Codex, Claude, or OpenCode bridge for the current directory, waits for the local endpoint, then opens the visible companion or panel.",
-          "Codex and Claude stay companion-bound; OpenCode stays persistent so the native panel can reattach cleanly.",
+          "All adapters are companion-bound: closing the companion/panel also stops the bridge.",
           "",
         ].join("\n"),
       );
@@ -243,7 +243,7 @@ export function buildBackgroundBridgeArgs(
   entryPath: string,
   options: LocalCompanionStartCliOptions,
 ): string[] {
-  const lifecycle = options.adapter === "opencode" ? "persistent" : "companion_bound";
+  const lifecycle = "companion_bound";
   const args = [
     "--no-warnings",
     "--experimental-strip-types",
@@ -327,52 +327,57 @@ async function waitForEndpoint(
 }
 
 async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promise<void> {
+  // If the lock is absent or the lock-holding process is dead, do NOT trust a
+  // leftover endpoint.  The bridge (WeChat transport) may have crashed while
+  // the opencode server kept running.  Starting only the panel would leave no
+  // bridge to poll WeChat messages.
   const lock = readBridgeLockFile();
-  if (lock && isPidAlive(lock.pid)) {
-    if (shouldAutoReclaimBridgeLock(lock)) {
-      await stopExistingBridge(lock, options.adapter);
-      log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
-      startBridgeInBackground(options);
-      await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
-      return;
+  const lockProcessAlive = lock ? isPidAlive(lock.pid) : false;
+  if (!lock || !lockProcessAlive) {
+    if (lock && !lockProcessAlive) {
+      log(options.adapter, `Found stale lock for ${options.cwd} (pid=${lock.pid} dead). Clearing.`);
+      clearLocalCompanionEndpoint(options.cwd);
     }
 
-    if (lock.adapter !== options.adapter || !isSameWorkspaceCwd(lock.cwd, options.cwd)) {
-      await stopExistingBridge(lock, options.adapter);
-      log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
-      startBridgeInBackground(options);
-      await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
-      return;
-    }
-
-    const endpointResult = await readUsableEndpoint(options.cwd, options.adapter);
-    if (options.adapter === "opencode" && endpointResult.incompatible) {
-      log(options.adapter, `Replacing incompatible OpenCode bridge for ${options.cwd}...`);
-      await stopExistingBridge(lock, options.adapter);
-      log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
-      startBridgeInBackground(options);
-      await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
-      return;
-    }
-
-    if (endpointResult.endpoint) {
-      log(options.adapter, `Reusing running bridge for ${options.cwd}.`);
-      return;
-    }
-
-    log(options.adapter, `Found running bridge for ${options.cwd}. Waiting for endpoint...`);
+    log(options.adapter, `Starting bridge in background for ${options.cwd}...`);
+    startBridgeInBackground(options);
     await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
     return;
   }
 
-  const existingEndpoint = await readUsableEndpoint(options.cwd, options.adapter);
-  if (existingEndpoint.endpoint) {
+  // Lock is held by a live process — check whether we can reuse or need to replace it.
+  if (shouldAutoReclaimBridgeLock(lock)) {
+    await stopExistingBridge(lock, options.adapter);
+    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
+    startBridgeInBackground(options);
+    await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
+    return;
+  }
+
+  if (lock.adapter !== options.adapter || !isSameWorkspaceCwd(lock.cwd, options.cwd)) {
+    await stopExistingBridge(lock, options.adapter);
+    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
+    startBridgeInBackground(options);
+    await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
+    return;
+  }
+
+  const endpointResult = await readUsableEndpoint(options.cwd, options.adapter);
+  if (options.adapter === "opencode" && endpointResult.incompatible) {
+    log(options.adapter, `Replacing incompatible OpenCode bridge for ${options.cwd}...`);
+    await stopExistingBridge(lock, options.adapter);
+    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
+    startBridgeInBackground(options);
+    await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
+    return;
+  }
+
+  if (endpointResult.endpoint) {
     log(options.adapter, `Reusing running bridge for ${options.cwd}.`);
     return;
   }
 
-  log(options.adapter, `Starting bridge in background for ${options.cwd}...`);
-  startBridgeInBackground(options);
+  log(options.adapter, `Found running bridge for ${options.cwd}. Waiting for endpoint...`);
   await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
 }
 
