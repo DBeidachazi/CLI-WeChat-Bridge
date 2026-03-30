@@ -1,4 +1,7 @@
 import { spawn as spawnChildProcess, type ChildProcess } from "node:child_process";
+import { watch as watchFs, type FSWatcher } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   type AdapterOptions,
@@ -94,31 +97,62 @@ type SdkPart = {
 
 type OpenCodeSdkClient = {
   session: {
-    list(options?: Record<string, unknown>): Promise<SdkResult<SdkSession[]>>;
-    create(options: { body?: Record<string, unknown>; query?: Record<string, unknown> }): Promise<SdkResult<SdkSession>>;
-    get(options: { path: { id: string }; query?: Record<string, unknown> }): Promise<SdkResult<SdkSession>>;
-    abort(options: { path: { id: string } }): Promise<SdkResult<unknown>>;
-    promptAsync(options: {
-      path: { id: string };
-      body: { parts: Array<{ type: string; text: string }> };
-      query?: Record<string, unknown>;
+    list(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession[]>>;
+    create(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession>>;
+    get(parameters: { sessionID: string; directory?: string }): Promise<SdkResult<SdkSession>>;
+    abort(parameters: { sessionID: string; directory?: string }): Promise<SdkResult<unknown>>;
+    promptAsync(parameters: {
+      sessionID: string;
+      directory?: string;
+      parts: Array<{ type: string; text: string }>;
     }): Promise<SdkResult<void>>;
   };
-  postSessionIdPermissionsPermissionId(options: {
-    path: { id: string; permissionID: string };
-    body: { response: string };
-    query?: Record<string, unknown>;
-  }): Promise<SdkResult<boolean>>;
+  permission: {
+    respond(parameters: {
+      sessionID: string;
+      permissionID: string;
+      directory?: string;
+      response: string;
+    }): Promise<SdkResult<boolean>>;
+  };
   event: {
-    subscribe(options?: Record<string, unknown>): Promise<{
-      stream: AsyncIterable<SdkEvent>;
+    subscribe(
+      parameters?: Record<string, unknown>,
+      options?: Record<string, unknown>,
+    ): Promise<{
+      stream: AsyncIterable<unknown>;
     }>;
+  };
+  global: {
+    event(options?: Record<string, unknown>): Promise<{
+      stream: AsyncIterable<unknown>;
+    }>;
+    syncEvent: {
+      subscribe(options?: Record<string, unknown>): Promise<{
+        stream: AsyncIterable<unknown>;
+      }>;
+    };
   };
 };
 
 type SdkEvent = {
   type: string;
   properties?: unknown;
+  data?: unknown;
+  payload?: unknown;
+};
+
+type SdkEventStreamName = "event" | "global-event" | "global-sync";
+
+type SdkEventSubscription = {
+  stream: AsyncIterable<unknown>;
+};
+
+type NormalizedSdkEvent = {
+  type: string;
+  properties?: unknown;
+  data?: unknown;
+  directory?: string;
 };
 
 type OpenCodePendingPermission = {
@@ -132,6 +166,8 @@ type OpenCodePendingPermission = {
 const OPENCODE_DEBUG_ENABLED = /^(1|true|yes|on)$/i.test(
   process.env.WECHAT_OPENCODE_DEBUG ?? "",
 );
+const OPENCODE_LOCAL_SESSION_FOLLOW_WINDOW_MS = 15_000;
+const OPENCODE_SESSION_DIFF_SETTLE_MS = 120;
 
 /* ------------------------------------------------------------------ */
 /*  Adapter                                                            */
@@ -147,6 +183,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private client: OpenCodeSdkClient | null = null;
   private sseAbortController: AbortController | null = null;
   private sseLoopPromise: Promise<void> | null = null;
+  private sessionDiffWatcher: FSWatcher | null = null;
+  private sessionDiffFollowQueue: Promise<void> = Promise.resolve();
+  private readonly sessionDiffTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private activeSessionId: string | null = null;
   private outputBatcher: OutputBatcher;
   private shuttingDown = false;
@@ -157,6 +196,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private workingNoticeSent = false;
   private lastBusyAtMs = 0;
   private pendingLocalPrompt = "";
+  private pendingLocalSessionFollowDeadlineMs = 0;
   private readonly loggedUnknownEventTypes = new Set<string>();
   private readonly emittedTextByPartId = new Map<string, string>();
   private readonly endpointToken = buildLocalCompanionToken();
@@ -211,6 +251,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await this.checkHealth();
       await this.initializeSessions();
       this.startSseListener();
+      this.startSessionDiffWatcher();
 
       this.state.pid = this.serverProcess!.pid;
       this.state.startedAt = nowIso();
@@ -252,8 +293,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     try {
       const result = await this.client.session.promptAsync({
-        path: { id: sessionId },
-        body: { parts: [{ type: "text", text: normalized }] },
+        sessionID: sessionId,
+        directory: this.options.cwd,
+        parts: [{ type: "text", text: normalized }],
       });
       if (result.error !== undefined) {
         throw new Error(`SDK error: ${describeUnknownError(result.error)}`);
@@ -293,7 +335,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     try {
       const session = this.unwrapOrThrow(
-        await this.client.session.get({ path: { id: sessionId } }),
+        await this.client.session.get({
+          sessionID: sessionId,
+          directory: this.options.cwd,
+        }),
       );
       this.assignActiveSession(session.id);
       this.recordSessionSwitch(session.id, "wechat", "wechat_resume", true);
@@ -313,7 +358,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.clearWechatWorkingNotice(true);
 
     try {
-      await this.client.session.abort({ path: { id: this.activeSessionId } });
+      await this.client.session.abort({
+        sessionID: this.activeSessionId,
+        directory: this.options.cwd,
+      });
     } catch {
       // Best effort abort.
     }
@@ -349,9 +397,11 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     const response = action === "confirm" ? "once" : "reject";
 
     try {
-      const result = await this.client.postSessionIdPermissionsPermissionId({
-        path: { id: sessionId, permissionID: permissionId },
-        body: { response },
+      const result = await this.client.permission.respond({
+        sessionID: sessionId,
+        permissionID: permissionId,
+        directory: this.options.cwd,
+        response,
       });
       if (result.error !== undefined) {
         throw new Error(`SDK error: ${describeUnknownError(result.error)}`);
@@ -376,6 +426,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.clearWechatWorkingNotice(true);
     this.pendingLocalPrompt = "";
     this.clearLocalEndpoint();
+    this.stopSessionDiffWatcher();
     this.outputBatcher.clear();
     this.clearStreamedPartState();
 
@@ -474,9 +525,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private async createSdkClient(): Promise<void> {
     try {
-      const { createOpencodeClient } = await import("@opencode-ai/sdk");
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
       this.client = createOpencodeClient({
         baseUrl: `http://${OPENCODE_SERVER_HOST}:${this.serverPort}`,
+        directory: this.options.cwd,
       }) as unknown as OpenCodeSdkClient;
     } catch (err) {
       throw new Error(
@@ -538,10 +590,168 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     try {
-      const result = await this.client.session.get({ path: { id: sessionId } });
+      const result = await this.client.session.get({
+        sessionID: sessionId,
+        directory: this.options.cwd,
+      });
       return result.error === undefined && Boolean(result.data?.id);
     } catch {
       return false;
+    }
+  }
+
+  private startSessionDiffWatcher(): void {
+    if (this.sessionDiffWatcher) {
+      return;
+    }
+
+    const sessionDiffDirectory = this.resolveSessionDiffDirectory();
+
+    try {
+      this.sessionDiffWatcher = watchFs(
+        sessionDiffDirectory,
+        { encoding: "utf8", persistent: false },
+        (_eventType, fileName) => {
+          this.handleSessionDiffFileEvent(fileName);
+        },
+      );
+      this.sessionDiffWatcher.on("error", (err) => {
+        if (this.shuttingDown) {
+          return;
+        }
+        this.logDebug(
+          `[opencode-adapter:session-diff] Watcher error: ${describeUnknownError(err)}`,
+        );
+      });
+    } catch (err) {
+      this.logDebug(
+        `[opencode-adapter:session-diff] Watcher unavailable at ${sessionDiffDirectory}: ${describeUnknownError(err)}`,
+      );
+    }
+  }
+
+  private stopSessionDiffWatcher(): void {
+    for (const timer of this.sessionDiffTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.sessionDiffTimers.clear();
+    this.sessionDiffFollowQueue = Promise.resolve();
+
+    if (!this.sessionDiffWatcher) {
+      return;
+    }
+
+    try {
+      this.sessionDiffWatcher.close();
+    } catch {
+      // Best effort.
+    }
+    this.sessionDiffWatcher = null;
+  }
+
+  private resolveSessionDiffDirectory(): string {
+    const override = process.env.WECHAT_OPENCODE_SESSION_DIFF_DIR?.trim();
+    if (override) {
+      return path.normalize(override);
+    }
+
+    const dataHome =
+      process.env.XDG_DATA_HOME?.trim() ||
+      path.join(os.homedir(), ".local", "share");
+    return path.join(dataHome, "opencode", "storage", "session_diff");
+  }
+
+  private handleSessionDiffFileEvent(fileName: string | Buffer | null): void {
+    const normalizedFileName =
+      typeof fileName === "string"
+        ? fileName
+        : fileName instanceof Buffer
+          ? fileName.toString("utf8")
+          : "";
+    const sessionId = this.extractSessionIdFromSessionDiffFile(normalizedFileName);
+    if (!sessionId) {
+      return;
+    }
+
+    const pendingTimer = this.sessionDiffTimers.get(sessionId);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.sessionDiffTimers.delete(sessionId);
+      this.enqueueSessionDiffFollow(sessionId);
+    }, OPENCODE_SESSION_DIFF_SETTLE_MS);
+    timer.unref?.();
+    this.sessionDiffTimers.set(sessionId, timer);
+  }
+
+  private extractSessionIdFromSessionDiffFile(fileName: string): string | null {
+    if (!fileName) {
+      return null;
+    }
+
+    const baseName = path.basename(fileName);
+    if (!baseName.toLowerCase().endsWith(".json")) {
+      return null;
+    }
+
+    const sessionId = baseName.slice(0, -".json".length);
+    if (!sessionId) {
+      return null;
+    }
+
+    return /^(ses_[a-z0-9]+|[0-9a-f-]{32,})$/i.test(sessionId) ? sessionId : null;
+  }
+
+  private enqueueSessionDiffFollow(sessionId: string): void {
+    this.sessionDiffFollowQueue = this.sessionDiffFollowQueue.then(
+      () => this.handleTouchedSessionDiffSession(sessionId),
+      () => this.handleTouchedSessionDiffSession(sessionId),
+    );
+  }
+
+  private async handleTouchedSessionDiffSession(sessionId: string): Promise<void> {
+    if (!this.client || this.shuttingDown) {
+      return;
+    }
+
+    const session = await this.getSessionForCurrentDirectory(sessionId);
+    if (!session) {
+      return;
+    }
+
+    if (session.id === this.activeSessionId) {
+      this.assignActiveSession(session.id);
+      return;
+    }
+
+    this.pendingLocalPrompt = "";
+    this.followLocalSession(session.id);
+  }
+
+  private async getSessionForCurrentDirectory(sessionId: string): Promise<SdkSession | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    try {
+      const result = await this.client.session.get({
+        sessionID: sessionId,
+        directory: this.options.cwd,
+      });
+      if (result.error !== undefined || !result.data) {
+        return null;
+      }
+      if (
+        this.normalizeDirectory(result.data.directory) !==
+        this.normalizeDirectory(this.options.cwd)
+      ) {
+        return null;
+      }
+      return result.data;
+    } catch {
+      return null;
     }
   }
 
@@ -553,18 +763,26 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     this.sseAbortController = new AbortController();
-    this.sseLoopPromise = this.runSseLoop();
+    this.sseLoopPromise = Promise.all([
+      this.runSseLoop("event"),
+      this.runSseLoop("global-event"),
+      this.runSseLoop("global-sync"),
+    ]).then(() => undefined);
   }
 
-  private async runSseLoop(): Promise<void> {
+  private async runSseLoop(streamName: SdkEventStreamName): Promise<void> {
     while (!this.shuttingDown) {
       try {
-        const subscription = await this.client!.event.subscribe();
+        const subscription = await this.subscribeToSseStream(streamName);
         const stream = subscription.stream;
 
-        for await (const event of stream) {
+        for await (const rawEvent of stream) {
           if (this.shuttingDown) {
             break;
+          }
+          const event = this.normalizeSdkEvent(rawEvent);
+          if (!event || !this.shouldHandleSseEvent(event, streamName)) {
+            continue;
           }
           this.handleSseEvent(event);
         }
@@ -573,7 +791,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
           return;
         }
         this.logDebug(
-          `[opencode-adapter:sse] Stream error: ${describeUnknownError(err)}`,
+          `[opencode-adapter:${streamName}] Stream error: ${describeUnknownError(err)}`,
         );
       }
 
@@ -585,8 +803,79 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
   }
 
+  private subscribeToSseStream(streamName: SdkEventStreamName): Promise<SdkEventSubscription> {
+    const signal = this.sseAbortController?.signal;
+    if (streamName === "global-sync") {
+      return this.client!.global.syncEvent.subscribe({ signal });
+    }
+    if (streamName === "global-event") {
+      return this.client!.global.event({ signal });
+    }
+    return this.client!.event.subscribe(
+      { directory: this.options.cwd },
+      { signal },
+    );
+  }
+
+  private normalizeSdkEvent(rawEvent: unknown): NormalizedSdkEvent | null {
+    if (!isRecord(rawEvent)) {
+      return null;
+    }
+
+    if (typeof rawEvent.type === "string") {
+      return rawEvent as NormalizedSdkEvent;
+    }
+
+    const payload = rawEvent.payload;
+    if (isRecord(payload) && typeof payload.type === "string") {
+      const normalized = { ...payload } as NormalizedSdkEvent;
+      if (typeof rawEvent.directory === "string") {
+        normalized.directory = rawEvent.directory;
+      }
+      return normalized;
+    }
+
+    return null;
+  }
+
+  private shouldHandleSseEvent(
+    event: NormalizedSdkEvent,
+    streamName: SdkEventStreamName,
+  ): boolean {
+    if (streamName === "event") {
+      return true;
+    }
+
+    const type = this.normalizeEventType(event.type);
+    if (streamName === "global-event") {
+      if (
+        type !== "tui.prompt.append" &&
+        type !== "tui.command.execute" &&
+        type !== "tui.session.select" &&
+        type !== "command.executed" &&
+        type !== "session.created" &&
+        type !== "session.updated" &&
+        type !== "session.deleted"
+      ) {
+        return false;
+      }
+      return this.matchesCurrentDirectoryEvent(event);
+    }
+
+    if (
+      type === "session.created" ||
+      type === "session.updated" ||
+      type === "session.deleted"
+    ) {
+      return this.matchesCurrentDirectoryEvent(event);
+    }
+
+    return false;
+  }
+
   private handleSseEvent(event: SdkEvent): void {
-    const { type } = event;
+    const type = this.normalizeEventType(event.type);
+    const payload = this.extractEventPayload(event);
 
     switch (type) {
       case "server.connected":
@@ -594,33 +883,33 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         return;
 
       case "session.idle": {
-        this.handleSessionIdle(isRecord(event.properties) ? event.properties : undefined);
+        this.handleSessionIdle(isRecord(payload) ? payload : undefined);
         return;
       }
 
       case "session.status": {
-        this.handleSessionStatus(isRecord(event.properties) ? event.properties : undefined);
+        this.handleSessionStatus(isRecord(payload) ? payload : undefined);
         return;
       }
 
       case "session.error": {
-        this.handleSessionError(isRecord(event.properties) ? event.properties : undefined);
+        this.handleSessionError(isRecord(payload) ? payload : undefined);
         return;
       }
 
       case "permission.updated":
       case "permission.asked": {
-        this.handlePermissionRequest(event.properties);
+        this.handlePermissionRequest(payload);
         return;
       }
 
       case "session.created": {
-        this.handleSessionCreated(event.properties);
+        this.handleSessionCreated(payload);
         return;
       }
 
       case "session.updated": {
-        this.handleSessionUpdated(event.properties);
+        this.handleSessionUpdated(payload);
         return;
       }
 
@@ -631,32 +920,37 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       }
 
       case "message.part.updated": {
-        this.handleMessagePartUpdated(event.properties);
+        this.handleMessagePartUpdated(payload);
         return;
       }
 
       case "message.part.delta": {
-        this.handleMessagePartDelta(event.properties);
+        this.handleMessagePartDelta(payload);
         return;
       }
 
       case "message.part.removed": {
-        this.handleMessagePartRemoved(event.properties);
+        this.handleMessagePartRemoved(payload);
         return;
       }
 
       case "tui.prompt.append": {
-        this.handleTuiPromptAppend(event.properties);
+        this.handleTuiPromptAppend(payload);
         return;
       }
 
       case "tui.command.execute": {
-        this.handleTuiCommandExecute(event.properties);
+        this.handleTuiCommandExecute(payload);
         return;
       }
 
       case "tui.session.select": {
-        this.handleTuiSessionSelect(event.properties);
+        this.handleTuiSessionSelect(payload);
+        return;
+      }
+
+      case "command.executed": {
+        this.handleCommandExecuted(payload);
         return;
       }
 
@@ -983,6 +1277,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
+    if (this.isLocalSessionNavigationCommand(command)) {
+      this.markPendingLocalSessionFollow();
+    }
+
     switch (command) {
       case "prompt.clear":
         this.pendingLocalPrompt = "";
@@ -1006,12 +1304,25 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     this.pendingLocalPrompt = "";
-    const changed = this.assignActiveSession(sessionId);
-    if (!changed) {
+    this.followLocalSession(sessionId);
+  }
+
+  private handleCommandExecuted(properties: unknown): void {
+    if (!isRecord(properties)) {
       return;
     }
 
-    this.recordSessionSwitch(sessionId, "local", "local_follow", true);
+    const name = typeof properties.name === "string" ? properties.name : undefined;
+    if (!this.isLocalSessionNavigationCommand(name)) {
+      return;
+    }
+
+    const sessionId = this.extractSessionId(properties);
+    if (sessionId && this.followLocalSession(sessionId)) {
+      return;
+    }
+
+    this.markPendingLocalSessionFollow();
   }
 
   private handleSessionError(properties: Record<string, unknown> | undefined): void {
@@ -1077,7 +1388,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     if (this.activeSessionId && this.client) {
       // Verify the session still exists.
       try {
-        const result = await this.client.session.get({ path: { id: this.activeSessionId } });
+        const result = await this.client.session.get({
+          sessionID: this.activeSessionId,
+          directory: this.options.cwd,
+        });
         if (result.error === undefined) {
           return this.activeSessionId;
         }
@@ -1092,7 +1406,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const session = this.unwrapOrThrow(
-      await this.client.session.create({ body: {} }),
+      await this.client.session.create({ directory: this.options.cwd }),
     );
     this.assignActiveSession(session.id);
     return session.id;
@@ -1281,6 +1595,11 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return true;
     }
 
+    if (this.shouldFollowPendingLocalSession(sessionId)) {
+      this.followLocalSession(sessionId);
+      return true;
+    }
+
     if (!this.activeSessionId) {
       this.assignActiveSession(sessionId);
       return true;
@@ -1308,6 +1627,85 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.state.activeTurnOrigin === "local" &&
       this.hasTrackedTurnState()
     );
+  }
+
+  private followLocalSession(sessionId: string): boolean {
+    this.clearPendingLocalSessionFollow();
+    const changed = this.assignActiveSession(sessionId);
+    if (!changed) {
+      return false;
+    }
+
+    this.recordSessionSwitch(sessionId, "local", "local_follow", true);
+    return true;
+  }
+
+  private markPendingLocalSessionFollow(): void {
+    this.pendingLocalSessionFollowDeadlineMs = Date.now() + OPENCODE_LOCAL_SESSION_FOLLOW_WINDOW_MS;
+  }
+
+  private clearPendingLocalSessionFollow(): void {
+    this.pendingLocalSessionFollowDeadlineMs = 0;
+  }
+
+  private shouldFollowPendingLocalSession(sessionId: string): boolean {
+    return (
+      sessionId !== this.activeSessionId &&
+      this.pendingLocalSessionFollowDeadlineMs > Date.now()
+    );
+  }
+
+  private isLocalSessionNavigationCommand(command: string | undefined): boolean {
+    if (!command) {
+      return false;
+    }
+
+    const normalized = command.trim().toLowerCase();
+    return (
+      normalized === "session" ||
+      normalized === "/session" ||
+      normalized.startsWith("session.") ||
+      normalized.startsWith("/session ")
+    );
+  }
+
+  private normalizeEventType(type: string): string {
+    return type.endsWith(".1") ? type.slice(0, -2) : type;
+  }
+
+  private extractEventPayload(event: SdkEvent): unknown {
+    const syncEvent = event as SdkEvent & { data?: unknown };
+    return syncEvent.properties ?? syncEvent.data;
+  }
+
+  private matchesCurrentDirectoryEvent(event: SdkEvent): boolean {
+    if (typeof (event as { directory?: unknown }).directory === "string") {
+      return (
+        this.normalizeDirectory((event as { directory: string }).directory) ===
+        this.normalizeDirectory(this.options.cwd)
+      );
+    }
+
+    const payload = this.extractEventPayload(event);
+    if (!isRecord(payload)) {
+      return false;
+    }
+
+    const info = isRecord(payload.info) ? payload.info : undefined;
+    const directory = typeof info?.directory === "string" ? info.directory : undefined;
+    if (directory) {
+      return this.normalizeDirectory(directory) === this.normalizeDirectory(this.options.cwd);
+    }
+
+    const sessionId = this.extractSessionId(payload);
+    return Boolean(
+      sessionId &&
+        (sessionId === this.activeSessionId || sessionId === this.state.sharedSessionId),
+    );
+  }
+
+  private normalizeDirectory(directory: string): string {
+    return directory.replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase();
   }
 
   private recordSessionSwitch(

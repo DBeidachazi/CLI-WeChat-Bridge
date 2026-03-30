@@ -137,7 +137,7 @@ describe("OpenCode startup session restore", () => {
       client: {
         session: {
           list(): Promise<unknown>;
-          get(options: { path: { id: string } }): Promise<unknown>;
+          get(options: { sessionID: string }): Promise<unknown>;
         };
       };
       activeSessionId: string | null;
@@ -159,9 +159,9 @@ describe("OpenCode startup session restore", () => {
           request: {},
           response: {},
         }),
-        get: async ({ path }) => ({
+        get: async ({ sessionID }) => ({
           data: undefined,
-          error: path.id === "session_missing" ? new Error("Session not found") : undefined,
+          error: sessionID === "session_missing" ? new Error("Session not found") : undefined,
           request: {},
           response: {},
         }),
@@ -189,7 +189,7 @@ describe("OpenCode startup session restore", () => {
       client: {
         session: {
           list(): Promise<unknown>;
-          get(options: { path: { id: string } }): Promise<unknown>;
+          get(options: { sessionID: string }): Promise<unknown>;
         };
       };
       activeSessionId: string | null;
@@ -211,9 +211,9 @@ describe("OpenCode startup session restore", () => {
           request: {},
           response: {},
         }),
-        get: async ({ path }) => ({
-          data: path.id === "session_restore" ? createSdkSession("session_restore") : undefined,
-          error: path.id === "session_restore" ? undefined : new Error("Session not found"),
+        get: async ({ sessionID }) => ({
+          data: sessionID === "session_restore" ? createSdkSession("session_restore") : undefined,
+          error: sessionID === "session_restore" ? undefined : new Error("Session not found"),
           request: {},
           response: {},
         }),
@@ -275,6 +275,172 @@ describe("OpenCode SSE event dispatch", () => {
     internal.handleSseEvent({ type: "session.created", properties: 42 });
 
     expect(events).toHaveLength(0);
+  });
+
+  test("starts both local and global sync SSE loops", async () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const internal = adapter as unknown as {
+      client: Record<string, unknown> | null;
+      sseLoopPromise: Promise<void> | null;
+      shuttingDown: boolean;
+      startSseListener(): void;
+      runSseLoop(streamName: string): Promise<void>;
+    };
+    const subscribedStreams: string[] = [];
+
+    internal.client = {
+      event: {},
+      global: { syncEvent: {} },
+    };
+    internal.runSseLoop = async (streamName: string) => {
+      subscribedStreams.push(streamName);
+    };
+
+    internal.startSseListener();
+    await internal.sseLoopPromise;
+
+    expect(subscribedStreams).toEqual(["event", "global-event", "global-sync"]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  session_diff local session follow                                  */
+/* ------------------------------------------------------------------ */
+
+describe("OpenCode session_diff local session follow", () => {
+  test("follows touched session diff files for the current directory", async () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      client: {
+        session: {
+          get(options: { sessionID: string; directory?: string }): Promise<unknown>;
+        };
+      } | null;
+      activeSessionId: string | null;
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      handleTouchedSessionDiffSession(sessionId: string): Promise<void>;
+    };
+
+    internal.client = {
+      session: {
+        get: async ({ sessionID }) => ({
+          data: {
+            id: sessionID,
+            projectID: "project_1",
+            directory: process.cwd(),
+            title: sessionID,
+            version: "1",
+            time: {
+              created: Date.now(),
+              updated: Date.now(),
+            },
+          },
+          error: undefined,
+          request: {},
+          response: {},
+        }),
+      },
+    };
+
+    internal.activeSessionId = "session_old_local";
+    await internal.handleTouchedSessionDiffSession("ses_selected_from_file");
+
+    expect(internal.activeSessionId).toBe("ses_selected_from_file");
+    expect(internal.state.sharedSessionId).toBe("ses_selected_from_file");
+    expect(internal.state.sharedThreadId).toBe("ses_selected_from_file");
+    expect(internal.state.activeRuntimeSessionId).toBe("ses_selected_from_file");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "ses_selected_from_file",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
+  });
+
+  test("ignores touched session diff files from another directory", async () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      client: {
+        session: {
+          get(options: { sessionID: string; directory?: string }): Promise<unknown>;
+        };
+      } | null;
+      activeSessionId: string | null;
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      handleTouchedSessionDiffSession(sessionId: string): Promise<void>;
+    };
+
+    internal.client = {
+      session: {
+        get: async ({ sessionID }) => ({
+          data: {
+            id: sessionID,
+            projectID: "project_1",
+            directory: "C:\\other-workspace",
+            title: sessionID,
+            version: "1",
+            time: {
+              created: Date.now(),
+              updated: Date.now(),
+            },
+          },
+          error: undefined,
+          request: {},
+          response: {},
+        }),
+      },
+    };
+
+    internal.activeSessionId = "session_old_local";
+    await internal.handleTouchedSessionDiffSession("ses_other_workspace");
+
+    expect(internal.activeSessionId).toBe("session_old_local");
+    expect(internal.state.sharedSessionId).toBeUndefined();
+    expect(events.filter((event) => event.type === "session_switched")).toHaveLength(0);
+  });
+
+  test("extracts valid session ids from session_diff filenames", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const internal = adapter as unknown as {
+      extractSessionIdFromSessionDiffFile(fileName: string): string | null;
+    };
+
+    expect(internal.extractSessionIdFromSessionDiffFile("ses_abc123.json")).toBe("ses_abc123");
+    expect(
+      internal.extractSessionIdFromSessionDiffFile(
+        "019d2ebf-e51c-77b1-9110-0db944e22696.json",
+      ),
+    ).toBe("019d2ebf-e51c-77b1-9110-0db944e22696");
+    expect(internal.extractSessionIdFromSessionDiffFile("not-a-session.txt")).toBeNull();
   });
 });
 
@@ -1042,6 +1208,293 @@ describe("OpenCode local TUI tracking", () => {
         reason: "local_follow",
       }),
     ]);
+  });
+
+  test("tracks /session command executions as local session switches", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "command.executed",
+      properties: { name: "session", sessionID: "session_selected_via_command", arguments: "" },
+    });
+
+    expect(internal.activeSessionId).toBe("session_selected_via_command");
+    expect(internal.state.sharedSessionId).toBe("session_selected_via_command");
+    expect(internal.state.sharedThreadId).toBe("session_selected_via_command");
+    expect(internal.state.activeRuntimeSessionId).toBe("session_selected_via_command");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_via_command",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
+  });
+
+  test("follows local /session switches from sync session.updated events", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "tui.command.execute",
+      properties: { command: "session.list" },
+    });
+    internal.handleSseEvent({
+      type: "session.updated.1",
+      data: { sessionID: "session_selected_via_sync", info: { id: "session_selected_via_sync" } },
+    });
+
+    expect(internal.activeSessionId).toBe("session_selected_via_sync");
+    expect(internal.state.sharedSessionId).toBe("session_selected_via_sync");
+    expect(internal.state.sharedThreadId).toBe("session_selected_via_sync");
+    expect(internal.state.activeRuntimeSessionId).toBe("session_selected_via_sync");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_via_sync",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
+  });
+
+  test("follows payload-wrapped global sync session updates for the current directory", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+      normalizeSdkEvent(event: unknown): { type: string; properties?: unknown; data?: unknown } | null;
+      shouldHandleSseEvent(
+        event: { type: string; properties?: unknown; data?: unknown },
+        streamName: string,
+      ): boolean;
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "tui.command.execute",
+      properties: { command: "session.list" },
+    });
+
+    const syncEvent = internal.normalizeSdkEvent({
+      payload: {
+        type: "session.updated.1",
+        data: {
+          sessionID: "session_selected_via_global_sync",
+          info: {
+            id: "session_selected_via_global_sync",
+            directory: process.cwd(),
+          },
+        },
+      },
+    });
+
+    expect(syncEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(syncEvent!, "global-sync")).toBe(true);
+    internal.handleSseEvent(syncEvent!);
+
+    expect(internal.activeSessionId).toBe("session_selected_via_global_sync");
+    expect(internal.state.sharedSessionId).toBe("session_selected_via_global_sync");
+    expect(internal.state.sharedThreadId).toBe("session_selected_via_global_sync");
+    expect(internal.state.activeRuntimeSessionId).toBe("session_selected_via_global_sync");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_via_global_sync",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
+  });
+
+  test("follows payload-wrapped global events for the current directory", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+      normalizeSdkEvent(
+        event: unknown,
+      ): { type: string; properties?: unknown; data?: unknown; directory?: string } | null;
+      shouldHandleSseEvent(
+        event: { type: string; properties?: unknown; data?: unknown; directory?: string },
+        streamName: string,
+      ): boolean;
+    };
+
+    internal.activeSessionId = "session_old_local";
+
+    const globalEvent = internal.normalizeSdkEvent({
+      directory: process.cwd(),
+      payload: {
+        type: "command.executed",
+        properties: {
+          name: "session",
+          sessionID: "session_selected_via_global_event",
+          arguments: "",
+          messageID: "msg_1",
+        },
+      },
+    });
+
+    expect(globalEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(globalEvent!, "global-event")).toBe(true);
+    internal.handleSseEvent(globalEvent!);
+
+    expect(internal.activeSessionId).toBe("session_selected_via_global_event");
+    expect(internal.state.sharedSessionId).toBe("session_selected_via_global_event");
+    expect(internal.state.sharedThreadId).toBe("session_selected_via_global_event");
+    expect(internal.state.activeRuntimeSessionId).toBe("session_selected_via_global_event");
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_via_global_event",
+        source: "local",
+        reason: "local_follow",
+      }),
+    ]);
+  });
+
+  test("ignores payload-wrapped global sync session updates from another directory", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+      normalizeSdkEvent(event: unknown): { type: string; properties?: unknown; data?: unknown } | null;
+      shouldHandleSseEvent(
+        event: { type: string; properties?: unknown; data?: unknown },
+        streamName: string,
+      ): boolean;
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "tui.command.execute",
+      properties: { command: "session.list" },
+    });
+
+    const syncEvent = internal.normalizeSdkEvent({
+      payload: {
+        type: "session.updated.1",
+        data: {
+          sessionID: "session_other_workspace",
+          info: {
+            id: "session_other_workspace",
+            directory: "C:\\other-workspace",
+          },
+        },
+      },
+    });
+
+    expect(syncEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(syncEvent!, "global-sync")).toBe(false);
+
+    expect(internal.activeSessionId).toBe("session_old_local");
+    expect(internal.state.sharedSessionId).toBeUndefined();
+    expect(events.filter((event) => event.type === "session_switched")).toHaveLength(0);
+  });
+
+  test("ignores payload-wrapped global events from another directory", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(
+        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
+      );
+    });
+    const internal = adapter as unknown as {
+      activeSessionId: string | null;
+      normalizeSdkEvent(
+        event: unknown,
+      ): { type: string; properties?: unknown; data?: unknown; directory?: string } | null;
+      shouldHandleSseEvent(
+        event: { type: string; properties?: unknown; data?: unknown; directory?: string },
+        streamName: string,
+      ): boolean;
+    };
+
+    internal.activeSessionId = "session_old_local";
+
+    const globalEvent = internal.normalizeSdkEvent({
+      directory: "C:\\other-workspace",
+      payload: {
+        type: "command.executed",
+        properties: {
+          name: "session",
+          sessionID: "session_other_workspace",
+          arguments: "",
+          messageID: "msg_1",
+        },
+      },
+    });
+
+    expect(globalEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(globalEvent!, "global-event")).toBe(false);
+    expect(events.filter((event) => event.type === "session_switched")).toHaveLength(0);
   });
 });
 

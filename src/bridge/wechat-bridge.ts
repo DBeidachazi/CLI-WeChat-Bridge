@@ -120,7 +120,6 @@ export function shouldForwardBridgeEventToWechat(
     case "stderr":
     case "notice":
     case "mirrored_user_input":
-    case "session_switched":
     case "thread_switched":
       return false;
     default:

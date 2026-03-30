@@ -106,7 +106,7 @@ describe("wechat-bridge cli helpers", () => {
     expect(shouldForwardBridgeEventToWechat("opencode", "stderr")).toBe(false);
     expect(shouldForwardBridgeEventToWechat("opencode", "notice")).toBe(false);
     expect(shouldForwardBridgeEventToWechat("opencode", "mirrored_user_input")).toBe(false);
-    expect(shouldForwardBridgeEventToWechat("opencode", "session_switched")).toBe(false);
+    expect(shouldForwardBridgeEventToWechat("opencode", "session_switched")).toBe(true);
     expect(shouldForwardBridgeEventToWechat("opencode", "thread_switched")).toBe(false);
     expect(shouldForwardBridgeEventToWechat("opencode", "final_reply")).toBe(true);
     expect(shouldForwardBridgeEventToWechat("opencode", "approval_required")).toBe(true);
