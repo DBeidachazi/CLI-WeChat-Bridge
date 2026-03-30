@@ -19,12 +19,9 @@ export function createBridgeAdapter(options: AdapterOptions): BridgeAdapter {
         ? new ClaudeCompanionAdapter(options)
         : new LocalCompanionProxyAdapter(options);
     case "opencode":
-      if (options.renderMode !== "embedded") {
-        throw new Error(
-          'OpenCode only supports renderMode "embedded". Start the visible panel with "wechat-opencode".',
-        );
-      }
-      return new OpenCodeServerAdapter(options);
+      return options.renderMode === "companion"
+        ? new OpenCodeServerAdapter(options)
+        : new LocalCompanionProxyAdapter(options);
     case "shell":
       return new ShellAdapter(options);
     default:

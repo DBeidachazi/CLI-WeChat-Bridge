@@ -38,12 +38,6 @@ import {
   truncatePreview,
   OutputBatcher,
 } from "./bridge-utils.ts";
-import {
-  buildLocalCompanionToken,
-  clearLocalCompanionEndpoint,
-  writeLocalCompanionEndpoint,
-  type LocalCompanionEndpoint,
-} from "../companion/local-companion-link.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Types for @opencode-ai/sdk (loose to avoid hard import-time deps) */
@@ -166,7 +160,6 @@ type OpenCodePendingPermission = {
 const OPENCODE_DEBUG_ENABLED = /^(1|true|yes|on)$/i.test(
   process.env.WECHAT_OPENCODE_DEBUG ?? "",
 );
-const OPENCODE_LOCAL_SESSION_FOLLOW_WINDOW_MS = 15_000;
 const OPENCODE_SESSION_DIFF_SETTLE_MS = 120;
 
 /* ------------------------------------------------------------------ */
@@ -179,6 +172,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private eventSink: EventSink = () => undefined;
 
   private serverProcess: ChildProcess | null = null;
+  private nativeProcess: ChildProcess | null = null;
   private serverPort = 0;
   private client: OpenCodeSdkClient | null = null;
   private sseAbortController: AbortController | null = null;
@@ -196,11 +190,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private workingNoticeSent = false;
   private lastBusyAtMs = 0;
   private pendingLocalPrompt = "";
-  private pendingLocalSessionFollowDeadlineMs = 0;
   private readonly loggedUnknownEventTypes = new Set<string>();
   private readonly emittedTextByPartId = new Map<string, string>();
-  private readonly endpointToken = buildLocalCompanionToken();
-  private endpoint: LocalCompanionEndpoint | null = null;
 
   private pendingPermission: OpenCodePendingPermission | null = null;
 
@@ -230,12 +221,12 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   async start(): Promise<void> {
-    if (this.serverProcess) {
+    if (this.serverProcess || this.nativeProcess) {
       return;
     }
 
     this.shuttingDown = false;
-    this.setStatus("starting", "Starting OpenCode server...");
+    this.setStatus("starting", "Starting OpenCode companion...");
 
     try {
       this.serverPort = await reserveLocalPort();
@@ -252,10 +243,13 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await this.initializeSessions();
       this.startSseListener();
       this.startSessionDiffWatcher();
+      if (this.options.renderMode === "companion") {
+        await this.startNativeClient();
+      } else {
+        this.state.pid = this.serverProcess?.pid;
+        this.state.startedAt = nowIso();
+      }
 
-      this.state.pid = this.serverProcess!.pid;
-      this.state.startedAt = nowIso();
-      this.publishLocalEndpoint();
       this.setStatus("idle", "OpenCode adapter is ready.");
     } catch (err) {
       this.state.status = "error";
@@ -308,43 +302,17 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   async listResumeSessions(limit = 10): Promise<BridgeResumeSessionCandidate[]> {
-    if (!this.client) {
-      return [];
-    }
-
-    try {
-      const result = await this.client.session.list();
-      if (result.error !== undefined) {
-        return [];
-      }
-      const sessions = result.data ?? [];
-      return sessions.slice(0, limit).map((s) => ({
-        sessionId: s.id,
-        title: truncatePreview(s.title || s.id, 120),
-        lastUpdatedAt: new Date(s.time.updated).toISOString(),
-      }));
-    } catch {
-      return [];
-    }
+    void limit;
+    throw new Error(
+      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.',
+    );
   }
 
   async resumeSession(sessionId: string): Promise<void> {
-    if (!this.client) {
-      throw new Error("OpenCode adapter is not running.");
-    }
-
-    try {
-      const session = this.unwrapOrThrow(
-        await this.client.session.get({
-          sessionID: sessionId,
-          directory: this.options.cwd,
-        }),
-      );
-      this.assignActiveSession(session.id);
-      this.recordSessionSwitch(session.id, "wechat", "wechat_resume", true);
-    } catch (err) {
-      throw new Error(`Failed to resume session ${sessionId}: ${describeUnknownError(err)}`);
-    }
+    void sessionId;
+    throw new Error(
+      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.',
+    );
   }
 
   async interrupt(): Promise<boolean> {
@@ -425,7 +393,6 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.shuttingDown = true;
     this.clearWechatWorkingNotice(true);
     this.pendingLocalPrompt = "";
-    this.clearLocalEndpoint();
     this.stopSessionDiffWatcher();
     this.outputBatcher.clear();
     this.clearStreamedPartState();
@@ -446,7 +413,16 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.sseLoopPromise = null;
     }
 
-    // Stop server process
+    if (this.nativeProcess) {
+      const proc = this.nativeProcess;
+      this.nativeProcess = null;
+      try {
+        killProcessTreeSync(proc.pid!);
+      } catch {
+        // Best effort.
+      }
+    }
+
     if (this.serverProcess) {
       const proc = this.serverProcess;
       this.serverProcess = null;
@@ -461,6 +437,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.activeSessionId = null;
     this.state.status = "stopped";
     this.state.pid = undefined;
+    this.state.startedAt = undefined;
   }
 
   /* ---- Server management ---- */
@@ -521,6 +498,68 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         timestamp: nowIso(),
       });
     });
+  }
+
+  private async startNativeClient(): Promise<void> {
+    if (this.nativeProcess) {
+      return;
+    }
+
+    const env = buildCliEnvironment(this.options.kind);
+    const attachArgs = await this.buildNativeAttachArgs();
+    const target = resolveSpawnTarget(this.options.command, this.options.kind, { env });
+    const startedAt = nowIso();
+    const child = spawnChildProcess(target.file, [...target.args, ...attachArgs], {
+      cwd: this.options.cwd,
+      env,
+      stdio: "inherit",
+      windowsHide: false,
+    });
+
+    this.nativeProcess = child;
+    this.state.pid = child.pid ?? process.pid;
+    this.state.startedAt = startedAt;
+
+    child.once("error", (err) => {
+      if (this.shuttingDown) {
+        return;
+      }
+      this.emit({
+        type: "fatal_error",
+        message: `Failed to start OpenCode companion: ${describeUnknownError(err)}`,
+        timestamp: nowIso(),
+      });
+      this.setStatus("error", "OpenCode companion failed to start.");
+    });
+
+    child.once("exit", (code, signal) => {
+      if (this.nativeProcess === child) {
+        this.nativeProcess = null;
+      }
+      if (this.shuttingDown) {
+        return;
+      }
+
+      this.state.pid = undefined;
+      this.setStatus("stopped", "OpenCode companion exited.");
+      const detail = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      this.emit({
+        type: "shutdown_requested",
+        reason: "companion_disconnected",
+        message: `OpenCode companion exited (${detail}).`,
+        exitCode: typeof code === "number" ? code : 0,
+        timestamp: nowIso(),
+      });
+    });
+  }
+
+  private async buildNativeAttachArgs(): Promise<string[]> {
+    const args = ["attach", this.getServerUrl()];
+    const sessionId = this.activeSessionId;
+    if (sessionId && (await this.hasSession(sessionId))) {
+      args.push("--session", sessionId);
+    }
+    return args;
   }
 
   private async createSdkClient(): Promise<void> {
@@ -1277,10 +1316,6 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    if (this.isLocalSessionNavigationCommand(command)) {
-      this.markPendingLocalSessionFollow();
-    }
-
     switch (command) {
       case "prompt.clear":
         this.pendingLocalPrompt = "";
@@ -1318,11 +1353,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const sessionId = this.extractSessionId(properties);
-    if (sessionId && this.followLocalSession(sessionId)) {
-      return;
+    if (sessionId) {
+      this.followLocalSession(sessionId);
     }
-
-    this.markPendingLocalSessionFollow();
   }
 
   private handleSessionError(properties: Record<string, unknown> | undefined): void {
@@ -1464,6 +1497,17 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.clearStreamedPartState();
   }
 
+  private clearTrackedTurnForLocalSessionSwitch(): void {
+    if (!this.hasTrackedTurnState()) {
+      return;
+    }
+
+    this.settleTurnState();
+    if (this.state.status !== "idle") {
+      this.setStatus("idle");
+    }
+  }
+
   private failTrackedTurn(message: string): void {
     if (!this.hasTrackedTurnState()) {
       return;
@@ -1570,7 +1614,6 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.state.sharedSessionId = sessionId;
     this.state.sharedThreadId = sessionId;
     this.state.activeRuntimeSessionId = sessionId;
-    this.publishLocalEndpoint();
     return changed;
   }
 
@@ -1592,16 +1635,6 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     if (options.allowLocalTurnFollow !== false && this.shouldFollowLocalTurnSession(sessionId)) {
       this.assignActiveSession(sessionId);
       this.recordSessionSwitch(sessionId, "local", "local_turn", true);
-      return true;
-    }
-
-    if (this.shouldFollowPendingLocalSession(sessionId)) {
-      this.followLocalSession(sessionId);
-      return true;
-    }
-
-    if (!this.activeSessionId) {
-      this.assignActiveSession(sessionId);
       return true;
     }
 
@@ -1630,29 +1663,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private followLocalSession(sessionId: string): boolean {
-    this.clearPendingLocalSessionFollow();
     const changed = this.assignActiveSession(sessionId);
     if (!changed) {
       return false;
     }
 
+    this.clearTrackedTurnForLocalSessionSwitch();
     this.recordSessionSwitch(sessionId, "local", "local_follow", true);
     return true;
-  }
-
-  private markPendingLocalSessionFollow(): void {
-    this.pendingLocalSessionFollowDeadlineMs = Date.now() + OPENCODE_LOCAL_SESSION_FOLLOW_WINDOW_MS;
-  }
-
-  private clearPendingLocalSessionFollow(): void {
-    this.pendingLocalSessionFollowDeadlineMs = 0;
-  }
-
-  private shouldFollowPendingLocalSession(sessionId: string): boolean {
-    return (
-      sessionId !== this.activeSessionId &&
-      this.pendingLocalSessionFollowDeadlineMs > Date.now()
-    );
   }
 
   private isLocalSessionNavigationCommand(command: string | undefined): boolean {
@@ -1729,46 +1747,6 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       reason,
       timestamp,
     });
-  }
-
-  private shouldPublishLocalEndpoint(): boolean {
-    return this.options.renderMode === "embedded";
-  }
-
-  private publishLocalEndpoint(): void {
-    if (!this.shouldPublishLocalEndpoint() || !this.serverPort || !this.state.startedAt) {
-      return;
-    }
-
-    const sharedSessionId = this.activeSessionId ?? this.state.sharedSessionId;
-    const payload: LocalCompanionEndpoint = {
-      instanceId: this.endpoint?.instanceId ?? `${process.pid}-${Date.now().toString(36)}`,
-      kind: this.options.kind,
-      port: this.serverPort,
-      token: this.endpointToken,
-      renderMode: "embedded",
-      bridgeOwnerPid: process.pid,
-      serverPort: this.serverPort,
-      serverUrl: this.getServerUrl(),
-      cwd: this.options.cwd,
-      command: this.options.command,
-      profile: this.options.profile,
-      sharedSessionId,
-      sharedThreadId: sharedSessionId,
-      startedAt: this.state.startedAt,
-    };
-
-    writeLocalCompanionEndpoint(payload);
-    this.endpoint = payload;
-  }
-
-  private clearLocalEndpoint(): void {
-    if (!this.shouldPublishLocalEndpoint()) {
-      return;
-    }
-
-    clearLocalCompanionEndpoint(this.options.cwd, this.endpoint?.instanceId);
-    this.endpoint = null;
   }
 
   private getServerUrl(): string {

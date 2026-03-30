@@ -34,7 +34,6 @@ type LocalCompanionStartCliOptions = {
 
 type EndpointReadResult = {
   endpoint: LocalCompanionEndpoint | null;
-  incompatible: boolean;
 };
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -204,39 +203,22 @@ async function isEndpointReachable(endpoint: LocalCompanionEndpoint): Promise<bo
   });
 }
 
-export function isEmbeddedOpenCodeEndpoint(endpoint: LocalCompanionEndpoint): boolean {
-  return (
-    endpoint.kind === "opencode" &&
-    endpoint.renderMode === "embedded" &&
-    (
-      (typeof endpoint.serverUrl === "string" && endpoint.serverUrl.trim().length > 0) ||
-      (typeof endpoint.serverPort === "number" && endpoint.serverPort > 0)
-    )
-  );
-}
-
 async function readUsableEndpoint(
   cwd: string,
   adapter: LocalCompanionLaunchAdapter,
 ): Promise<EndpointReadResult> {
   const endpoint = readLocalCompanionEndpoint(cwd);
   if (!endpoint || endpoint.kind !== adapter) {
-    return { endpoint: null, incompatible: false };
-  }
-
-  if (adapter === "opencode" && !isEmbeddedOpenCodeEndpoint(endpoint)) {
-    clearLocalCompanionEndpoint(cwd, endpoint.instanceId);
-    log(adapter, `Removed incompatible legacy OpenCode endpoint for ${cwd}.`);
-    return { endpoint: null, incompatible: true };
+    return { endpoint: null };
   }
 
   if (await isEndpointReachable(endpoint)) {
-    return { endpoint, incompatible: false };
+    return { endpoint };
   }
 
   clearLocalCompanionEndpoint(cwd, endpoint.instanceId);
   log(adapter, `Removed stale local companion endpoint for ${cwd}.`);
-  return { endpoint: null, incompatible: false };
+  return { endpoint: null };
 }
 
 export function buildBackgroundBridgeArgs(
@@ -264,31 +246,24 @@ export function buildBackgroundBridgeArgs(
 }
 
 export function resolveForegroundClientEntryPath(
-  adapter: LocalCompanionLaunchAdapter,
+  _adapter: LocalCompanionLaunchAdapter,
 ): string {
-  return path.resolve(
-    MODULE_DIR,
-    adapter === "opencode" ? "opencode-panel.ts" : "local-companion.ts",
-  );
+  return path.resolve(MODULE_DIR, "local-companion.ts");
 }
 
 export function buildForegroundClientArgs(
   entryPath: string,
   options: LocalCompanionStartCliOptions,
 ): string[] {
-  const args = [
+  return [
     "--no-warnings",
     "--experimental-strip-types",
     entryPath,
+    "--adapter",
+    options.adapter,
+    "--cwd",
+    options.cwd,
   ];
-
-  if (options.adapter === "opencode") {
-    args.push("--cwd", options.cwd);
-    return args;
-  }
-
-  args.push("--adapter", options.adapter, "--cwd", options.cwd);
-  return args;
 }
 
 function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
@@ -363,15 +338,6 @@ async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promis
   }
 
   const endpointResult = await readUsableEndpoint(options.cwd, options.adapter);
-  if (options.adapter === "opencode" && endpointResult.incompatible) {
-    log(options.adapter, `Replacing incompatible OpenCode bridge for ${options.cwd}...`);
-    await stopExistingBridge(lock, options.adapter);
-    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
-    startBridgeInBackground(options);
-    await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
-    return;
-  }
-
   if (endpointResult.endpoint) {
     log(options.adapter, `Reusing running bridge for ${options.cwd}.`);
     return;

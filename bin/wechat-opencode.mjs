@@ -2,4 +2,4 @@
 
 import { runTsEntry } from "./_run-entry.mjs";
 
-runTsEntry("src/companion/opencode-panel.ts");
+runTsEntry("src/companion/local-companion.ts", ["--adapter", "opencode"]);

@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   buildBackgroundBridgeArgs,
   buildForegroundClientArgs,
-  isEmbeddedOpenCodeEndpoint,
   isSameWorkspaceCwd,
   normalizeComparablePath,
   parseCliArgs,
@@ -100,17 +99,17 @@ describe("local-companion-start helpers", () => {
     ]);
   });
 
-  test("resolveForegroundClientEntryPath uses the native OpenCode panel entry", () => {
+  test("resolveForegroundClientEntryPath always launches the shared local companion entry", () => {
     expect(resolveForegroundClientEntryPath("codex")).toBe(
       path.resolve(process.cwd(), "src", "companion", "local-companion.ts"),
     );
     expect(resolveForegroundClientEntryPath("opencode")).toBe(
-      path.resolve(process.cwd(), "src", "companion", "opencode-panel.ts"),
+      path.resolve(process.cwd(), "src", "companion", "local-companion.ts"),
     );
   });
 
-  test("buildForegroundClientArgs omits --adapter for the OpenCode panel entry", () => {
-    const args = buildForegroundClientArgs("/tmp/opencode-panel.ts", {
+  test("buildForegroundClientArgs forwards the adapter for OpenCode too", () => {
+    const args = buildForegroundClientArgs("/tmp/local-companion.ts", {
       adapter: "opencode",
       cwd: path.resolve("./tmp/project"),
       timeoutMs: 15000,
@@ -119,7 +118,9 @@ describe("local-companion-start helpers", () => {
     expect(args).toEqual([
       "--no-warnings",
       "--experimental-strip-types",
-      "/tmp/opencode-panel.ts",
+      "/tmp/local-companion.ts",
+      "--adapter",
+      "opencode",
       "--cwd",
       path.resolve("./tmp/project"),
     ]);
@@ -151,33 +152,5 @@ describe("local-companion-start helpers", () => {
 
   test("isSameWorkspaceCwd matches equivalent directory paths", () => {
     expect(isSameWorkspaceCwd(".", process.cwd())).toBe(true);
-  });
-
-  test("isEmbeddedOpenCodeEndpoint only accepts native embedded endpoints", () => {
-    expect(
-      isEmbeddedOpenCodeEndpoint({
-        instanceId: "endpoint-1",
-        kind: "opencode",
-        port: 4200,
-        token: "token",
-        renderMode: "embedded",
-        serverPort: 4200,
-        cwd: process.cwd(),
-        command: "opencode",
-        startedAt: "2026-03-28T00:00:00.000Z",
-      }),
-    ).toBe(true);
-
-    expect(
-      isEmbeddedOpenCodeEndpoint({
-        instanceId: "endpoint-2",
-        kind: "opencode",
-        port: 4200,
-        token: "token",
-        cwd: process.cwd(),
-        command: "opencode",
-        startedAt: "2026-03-28T00:00:00.000Z",
-      }),
-    ).toBe(false);
   });
 });

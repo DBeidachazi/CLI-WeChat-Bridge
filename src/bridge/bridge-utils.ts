@@ -913,7 +913,7 @@ export function formatFinalReplyMessage(
 const OPENCODE_WORKING_NOTICE_RE = /^OpenCode is still working on:\s*$/i;
 const OPENCODE_TRANSIENT_NOTICE_RES = [
   /^Bridge error: opencode companion is not connected\./i,
-  /^OpenCode panel is not connected(?: for bridge workspace)?:?$/i,
+  /^OpenCode companion is not connected(?: for bridge workspace)?:?$/i,
   /^Run "wechat-(?:bridge-opencode|opencode(?:-start)?)".*$/i,
   /^OpenCode session switched to \S+ from the local terminal\.$/i,
   /^Local OpenCode input:\s*$/i,

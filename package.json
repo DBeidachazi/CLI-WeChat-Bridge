@@ -50,7 +50,7 @@
     "bridge:claude": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter claude",
     "bridge:shell": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter shell",
     "bridge:opencode": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter opencode",
-    "opencode:panel": "node --no-warnings --experimental-strip-types src/companion/opencode-panel.ts",
+    "opencode:panel": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter opencode",
     "opencode:start": "node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter opencode",
     "bridge:bun": "bun src/bridge/wechat-bridge.ts",
     "test": "bun test test",

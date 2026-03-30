@@ -143,8 +143,8 @@ export function formatUserFacingInboundError(params: {
     /opencode companion is not connected/i.test(errorText)
   ) {
     return cwd
-      ? `OpenCode panel is not connected for bridge workspace:\n${cwd}\nRun "wechat-opencode" in that directory to reconnect the current panel, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.`
-      : 'OpenCode panel is not connected. Start "wechat-opencode" in this directory to reconnect it, then retry.';
+      ? `OpenCode companion is not connected for bridge workspace:\n${cwd}\nRun "wechat-opencode" in that directory to reconnect the current local terminal, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.`
+      : 'OpenCode companion is not connected. Start "wechat-opencode" in this directory to reconnect it, then retry.';
   }
 
   return `Bridge error: ${errorText}`;
@@ -348,8 +348,8 @@ async function main(): Promise<void> {
   };
 
   // Clear any stale endpoint left by a previous bridge for this workspace.
-  // This prevents `wechat-opencode` / `wechat-codex` from connecting to a
-  // dead server while the new bridge is still starting up.
+  // This prevents `wechat-*` companions from reconnecting to a dead bridge
+  // while the new runtime is still starting up.
   clearLocalCompanionEndpoint(options.cwd);
   stateStore.appendLog(`Cleared stale companion endpoint for ${options.cwd} before adapter start.`);
 
@@ -359,7 +359,6 @@ async function main(): Promise<void> {
     cwd: options.cwd,
     profile: options.profile,
     lifecycle: options.lifecycle,
-    renderMode: options.adapter === "opencode" ? "embedded" : undefined,
     initialSharedSessionId:
       stateStore.getState().sharedSessionId ?? stateStore.getState().sharedThreadId,
     initialResumeConversationId: stateStore.getState().resumeConversationId,
@@ -555,7 +554,7 @@ async function main(): Promise<void> {
       );
     } else if (options.adapter === "opencode") {
       log(
-        'Start the visible OpenCode panel in a second terminal with: wechat-opencode',
+        'Start the visible OpenCode companion in a second terminal with: wechat-opencode',
       );
     } else if (options.adapter === "claude") {
       log(
