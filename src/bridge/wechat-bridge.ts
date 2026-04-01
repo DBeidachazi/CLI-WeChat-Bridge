@@ -110,6 +110,9 @@ export function formatUserFacingBridgeFatalError(message: string): string {
 export function shouldForwardBridgeEventToWechat(
   adapter: BridgeAdapterKind,
   eventType: BridgeEvent["type"],
+  options: {
+    text?: string;
+  } = {},
 ): boolean {
   if (adapter !== "opencode") {
     return true;
@@ -118,10 +121,12 @@ export function shouldForwardBridgeEventToWechat(
   switch (eventType) {
     case "stdout":
     case "stderr":
-    case "notice":
-    case "mirrored_user_input":
     case "thread_switched":
       return false;
+    case "notice":
+      return /^OpenCode local draft:\s*/i.test(options.text ?? "");
+    case "mirrored_user_input":
+      return true;
     default:
       return true;
   }
@@ -801,7 +806,7 @@ function wireAdapterEvents(params: {
       case "notice":
         updateLastOutputAt();
         stateStore.appendLog(`${event.level}_notice: ${truncatePreview(event.text)}`);
-        if (shouldForwardBridgeEventToWechat(options.adapter, event.type)) {
+        if (shouldForwardBridgeEventToWechat(options.adapter, event.type, { text: event.text })) {
           void outputBatcher.flushNow().then(async () => {
             await queueWechatMessage(authorizedUserId, event.text, "notice");
           });
@@ -823,7 +828,7 @@ function wireAdapterEvents(params: {
         break;
       case "mirrored_user_input":
         stateStore.appendLog(`mirrored_local_input: ${truncatePreview(event.text)}`);
-        if (shouldForwardBridgeEventToWechat(options.adapter, event.type)) {
+        if (shouldForwardBridgeEventToWechat(options.adapter, event.type, { text: event.text })) {
           void outputBatcher.flushNow().then(async () => {
             await queueWechatMessage(
               authorizedUserId,

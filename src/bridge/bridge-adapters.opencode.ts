@@ -1,7 +1,4 @@
 import { spawn as spawnChildProcess, type ChildProcess } from "node:child_process";
-import { watch as watchFs, type FSWatcher } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import {
   type AdapterOptions,
@@ -56,6 +53,7 @@ type SdkResult<T> =
 type SdkSession = {
   id: string;
   projectID: string;
+  workspaceID?: string;
   directory: string;
   parentID?: string;
   title: string;
@@ -93,11 +91,20 @@ type OpenCodeSdkClient = {
   session: {
     list(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession[]>>;
     create(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession>>;
-    get(parameters: { sessionID: string; directory?: string }): Promise<SdkResult<SdkSession>>;
-    abort(parameters: { sessionID: string; directory?: string }): Promise<SdkResult<unknown>>;
+    get(parameters: {
+      sessionID: string;
+      directory?: string;
+      workspace?: string;
+    }): Promise<SdkResult<SdkSession>>;
+    abort(parameters: {
+      sessionID: string;
+      directory?: string;
+      workspace?: string;
+    }): Promise<SdkResult<unknown>>;
     promptAsync(parameters: {
       sessionID: string;
       directory?: string;
+      workspace?: string;
       parts: Array<{ type: string; text: string }>;
     }): Promise<SdkResult<void>>;
   };
@@ -106,7 +113,15 @@ type OpenCodeSdkClient = {
       sessionID: string;
       permissionID: string;
       directory?: string;
+      workspace?: string;
       response: string;
+    }): Promise<SdkResult<boolean>>;
+  };
+  tui: {
+    selectSession(parameters?: {
+      directory?: string;
+      workspace?: string;
+      sessionID?: string;
     }): Promise<SdkResult<boolean>>;
   };
   event: {
@@ -157,10 +172,26 @@ type OpenCodePendingPermission = {
   request: ApprovalRequest;
 };
 
+type ObservedOpenCodeMessage = {
+  sessionId: string;
+  role?: "user" | "assistant";
+  text: string;
+  emitted: boolean;
+  updatedAtMs: number;
+};
+
+type PendingWechatPromptMirrorSuppression = {
+  sessionId: string;
+  text: string;
+  createdAtMs: number;
+};
+
 const OPENCODE_DEBUG_ENABLED = /^(1|true|yes|on)$/i.test(
   process.env.WECHAT_OPENCODE_DEBUG ?? "",
 );
-const OPENCODE_SESSION_DIFF_SETTLE_MS = 120;
+const OPENCODE_DUPLICATE_EVENT_TTL_MS = 150;
+const OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS = 30_000;
+const OPENCODE_RECENT_LOCAL_PROMPT_TTL_MS = 10_000;
 
 /* ------------------------------------------------------------------ */
 /*  Adapter                                                            */
@@ -177,10 +208,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private client: OpenCodeSdkClient | null = null;
   private sseAbortController: AbortController | null = null;
   private sseLoopPromise: Promise<void> | null = null;
-  private sessionDiffWatcher: FSWatcher | null = null;
-  private sessionDiffFollowQueue: Promise<void> = Promise.resolve();
-  private readonly sessionDiffTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private activeSessionId: string | null = null;
+  private activeWorkspaceId: string | null = null;
   private outputBatcher: OutputBatcher;
   private shuttingDown = false;
   private hasAcceptedInput = false;
@@ -190,8 +219,19 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private workingNoticeSent = false;
   private lastBusyAtMs = 0;
   private pendingLocalPrompt = "";
+  private localPromptNoticeSent = false;
   private readonly loggedUnknownEventTypes = new Set<string>();
   private readonly emittedTextByPartId = new Map<string, string>();
+  private readonly observedOpenCodeMessages = new Map<string, ObservedOpenCodeMessage>();
+  private readonly observedUserTextByPartId = new Map<string, string>();
+  private readonly observedUserMessagePartIds = new Map<string, Set<string>>();
+  private readonly pendingWechatPromptMirrorSuppressions: PendingWechatPromptMirrorSuppression[] = [];
+  private readonly recentSdkEventObservations = new Map<
+    string,
+    { streamName: SdkEventStreamName; observedAtMs: number }
+  >();
+  private suppressedTuiSessionSelectId: string | null = null;
+  private lastMirroredLocalPrompt: { text: string; createdAtMs: number } | null = null;
 
   private pendingPermission: OpenCodePendingPermission | null = null;
 
@@ -242,9 +282,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await this.checkHealth();
       await this.initializeSessions();
       this.startSseListener();
-      this.startSessionDiffWatcher();
       if (this.options.renderMode === "companion") {
         await this.startNativeClient();
+        await this.syncVisibleSessionToShared({ force: true });
       } else {
         this.state.pid = this.serverProcess?.pid;
         this.state.startedAt = nowIso();
@@ -282,13 +322,19 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.outputBatcher.clear();
     this.clearStreamedPartState();
 
-    const sessionId = await this.ensureSession();
-    this.assignActiveSession(sessionId);
+    const session = await this.ensureSession();
+    this.switchSharedSession(session, {
+      source: "wechat",
+      reason: "wechat_resume",
+      syncVisible: true,
+      forceVisibleSync: true,
+    });
 
     try {
       const result = await this.client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: session.id,
         directory: this.options.cwd,
+        workspace: session.workspaceID ?? this.activeWorkspaceId ?? undefined,
         parts: [{ type: "text", text: normalized }],
       });
       if (result.error !== undefined) {
@@ -298,6 +344,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       throw new Error(`Failed to send prompt: ${describeUnknownError(err)}`);
     }
 
+    this.recordPendingWechatPromptMirrorSuppression(session.id, normalized);
     this.beginTrackedTurn(normalized, "wechat");
   }
 
@@ -329,6 +376,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await this.client.session.abort({
         sessionID: this.activeSessionId,
         directory: this.options.cwd,
+        workspace: this.activeWorkspaceId ?? undefined,
       });
     } catch {
       // Best effort abort.
@@ -340,6 +388,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   async reset(): Promise<void> {
     this.clearWechatWorkingNotice(true);
     this.pendingLocalPrompt = "";
+    this.localPromptNoticeSent = false;
+    this.clearObservedMessageTracking();
+    this.recentSdkEventObservations.clear();
     this.clearPendingPermissionState();
     this.activeSessionId = null;
     this.state.sharedSessionId = undefined;
@@ -369,6 +420,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         sessionID: sessionId,
         permissionID: permissionId,
         directory: this.options.cwd,
+        workspace: this.activeWorkspaceId ?? undefined,
         response,
       });
       if (result.error !== undefined) {
@@ -393,7 +445,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.shuttingDown = true;
     this.clearWechatWorkingNotice(true);
     this.pendingLocalPrompt = "";
-    this.stopSessionDiffWatcher();
+    this.localPromptNoticeSent = false;
+    this.clearObservedMessageTracking();
+    this.recentSdkEventObservations.clear();
     this.outputBatcher.clear();
     this.clearStreamedPartState();
 
@@ -435,6 +489,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     this.client = null;
     this.activeSessionId = null;
+    this.activeWorkspaceId = null;
+    this.suppressedTuiSessionSelectId = null;
     this.state.status = "stopped";
     this.state.pid = undefined;
     this.state.startedAt = undefined;
@@ -568,6 +624,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.client = createOpencodeClient({
         baseUrl: `http://${OPENCODE_SERVER_HOST}:${this.serverPort}`,
         directory: this.options.cwd,
+        experimental_workspaceID: this.activeWorkspaceId ?? undefined,
       }) as unknown as OpenCodeSdkClient;
     } catch (err) {
       throw new Error(
@@ -594,9 +651,18 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     try {
       const result = await this.client.session.list();
       if (result.data && result.data.length > 0) {
-        listedSessions = result.data;
-        const latest = result.data[0]!;
-        this.assignActiveSession(latest.id);
+        listedSessions = result.data.filter((session) => this.isCurrentDirectorySession(session));
+        const latest = listedSessions[0];
+        if (latest) {
+          this.switchSharedSession(latest, {
+            source: "restore",
+            reason: "startup_restore",
+            syncVisible: false,
+          });
+          this.state.lastSessionSwitchAt = undefined;
+          this.state.lastSessionSwitchSource = undefined;
+          this.state.lastSessionSwitchReason = undefined;
+        }
       }
     } catch {
       // Session listing is optional at startup.
@@ -604,15 +670,16 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     if (this.options.initialSharedSessionId) {
       const restoredSessionId = this.options.initialSharedSessionId;
-      const exists = await this.hasSession(restoredSessionId, listedSessions);
-      if (!exists) {
+      const restoredSession = await this.getSessionForCurrentDirectory(restoredSessionId, listedSessions);
+      if (!restoredSession) {
         return;
       }
 
-      const changed = this.assignActiveSession(restoredSessionId);
-      if (changed) {
-        this.recordSessionSwitch(restoredSessionId, "restore", "startup_restore");
-      }
+      this.switchSharedSession(restoredSession, {
+        source: "restore",
+        reason: "startup_restore",
+        syncVisible: false,
+      });
     }
   }
 
@@ -620,178 +687,57 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     sessionId: string,
     listedSessions: SdkSession[] = [],
   ): Promise<boolean> {
-    if (!sessionId || !this.client) {
-      return false;
-    }
-
-    if (listedSessions.some((session) => session.id === sessionId)) {
-      return true;
-    }
-
-    try {
-      const result = await this.client.session.get({
-        sessionID: sessionId,
-        directory: this.options.cwd,
-      });
-      return result.error === undefined && Boolean(result.data?.id);
-    } catch {
-      return false;
-    }
+    return Boolean(await this.getSessionForCurrentDirectory(sessionId, listedSessions));
   }
 
-  private startSessionDiffWatcher(): void {
-    if (this.sessionDiffWatcher) {
-      return;
-    }
-
-    const sessionDiffDirectory = this.resolveSessionDiffDirectory();
-
-    try {
-      this.sessionDiffWatcher = watchFs(
-        sessionDiffDirectory,
-        { encoding: "utf8", persistent: false },
-        (_eventType, fileName) => {
-          this.handleSessionDiffFileEvent(fileName);
-        },
-      );
-      this.sessionDiffWatcher.on("error", (err) => {
-        if (this.shuttingDown) {
-          return;
-        }
-        this.logDebug(
-          `[opencode-adapter:session-diff] Watcher error: ${describeUnknownError(err)}`,
-        );
-      });
-    } catch (err) {
-      this.logDebug(
-        `[opencode-adapter:session-diff] Watcher unavailable at ${sessionDiffDirectory}: ${describeUnknownError(err)}`,
-      );
-    }
-  }
-
-  private stopSessionDiffWatcher(): void {
-    for (const timer of this.sessionDiffTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.sessionDiffTimers.clear();
-    this.sessionDiffFollowQueue = Promise.resolve();
-
-    if (!this.sessionDiffWatcher) {
-      return;
-    }
-
-    try {
-      this.sessionDiffWatcher.close();
-    } catch {
-      // Best effort.
-    }
-    this.sessionDiffWatcher = null;
-  }
-
-  private resolveSessionDiffDirectory(): string {
-    const override = process.env.WECHAT_OPENCODE_SESSION_DIFF_DIR?.trim();
-    if (override) {
-      return path.normalize(override);
-    }
-
-    const dataHome =
-      process.env.XDG_DATA_HOME?.trim() ||
-      path.join(os.homedir(), ".local", "share");
-    return path.join(dataHome, "opencode", "storage", "session_diff");
-  }
-
-  private handleSessionDiffFileEvent(fileName: string | Buffer | null): void {
-    const normalizedFileName =
-      typeof fileName === "string"
-        ? fileName
-        : fileName instanceof Buffer
-          ? fileName.toString("utf8")
-          : "";
-    const sessionId = this.extractSessionIdFromSessionDiffFile(normalizedFileName);
-    if (!sessionId) {
-      return;
-    }
-
-    const pendingTimer = this.sessionDiffTimers.get(sessionId);
-    if (pendingTimer) {
-      clearTimeout(pendingTimer);
-    }
-
-    const timer = setTimeout(() => {
-      this.sessionDiffTimers.delete(sessionId);
-      this.enqueueSessionDiffFollow(sessionId);
-    }, OPENCODE_SESSION_DIFF_SETTLE_MS);
-    timer.unref?.();
-    this.sessionDiffTimers.set(sessionId, timer);
-  }
-
-  private extractSessionIdFromSessionDiffFile(fileName: string): string | null {
-    if (!fileName) {
-      return null;
-    }
-
-    const baseName = path.basename(fileName);
-    if (!baseName.toLowerCase().endsWith(".json")) {
-      return null;
-    }
-
-    const sessionId = baseName.slice(0, -".json".length);
-    if (!sessionId) {
-      return null;
-    }
-
-    return /^(ses_[a-z0-9]+|[0-9a-f-]{32,})$/i.test(sessionId) ? sessionId : null;
-  }
-
-  private enqueueSessionDiffFollow(sessionId: string): void {
-    this.sessionDiffFollowQueue = this.sessionDiffFollowQueue.then(
-      () => this.handleTouchedSessionDiffSession(sessionId),
-      () => this.handleTouchedSessionDiffSession(sessionId),
-    );
-  }
-
-  private async handleTouchedSessionDiffSession(sessionId: string): Promise<void> {
-    if (!this.client || this.shuttingDown) {
-      return;
-    }
-
-    const session = await this.getSessionForCurrentDirectory(sessionId);
-    if (!session) {
-      return;
-    }
-
-    if (session.id === this.activeSessionId) {
-      this.assignActiveSession(session.id);
-      return;
-    }
-
-    this.pendingLocalPrompt = "";
-    this.followLocalSession(session.id);
-  }
-
-  private async getSessionForCurrentDirectory(sessionId: string): Promise<SdkSession | null> {
+  private async getSessionForCurrentDirectory(
+    sessionId: string,
+    listedSessions: SdkSession[] = [],
+  ): Promise<SdkSession | null> {
     if (!this.client) {
       return null;
     }
 
-    try {
-      const result = await this.client.session.get({
-        sessionID: sessionId,
-        directory: this.options.cwd,
-      });
-      if (result.error !== undefined || !result.data) {
-        return null;
-      }
-      if (
-        this.normalizeDirectory(result.data.directory) !==
-        this.normalizeDirectory(this.options.cwd)
-      ) {
-        return null;
-      }
-      return result.data;
-    } catch {
-      return null;
+    const listedSession = listedSessions.find((session) => session.id === sessionId);
+    if (listedSession && this.isCurrentDirectorySession(listedSession)) {
+      return listedSession;
     }
+
+    const queryVariants = this.activeWorkspaceId
+      ? [
+          {
+            sessionID: sessionId,
+            directory: this.options.cwd,
+            workspace: this.activeWorkspaceId,
+          },
+          {
+            sessionID: sessionId,
+            directory: this.options.cwd,
+          },
+        ]
+      : [
+          {
+            sessionID: sessionId,
+            directory: this.options.cwd,
+          },
+        ];
+
+    for (const query of queryVariants) {
+      try {
+        const result = await this.client.session.get(query);
+        if (result.error !== undefined || !result.data) {
+          continue;
+        }
+        if (!this.isCurrentDirectorySession(result.data)) {
+          return null;
+        }
+        return result.data;
+      } catch {
+        // Try the next query variant.
+      }
+    }
+
+    return null;
   }
 
   /* ---- SSE event handling ---- */
@@ -823,6 +769,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
           if (!event || !this.shouldHandleSseEvent(event, streamName)) {
             continue;
           }
+          if (this.shouldSkipDuplicateSdkEvent(event, streamName)) {
+            continue;
+          }
           this.handleSseEvent(event);
         }
       } catch (err) {
@@ -851,7 +800,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return this.client!.global.event({ signal });
     }
     return this.client!.event.subscribe(
-      { directory: this.options.cwd },
+      {
+        directory: this.options.cwd,
+        workspace: this.activeWorkspaceId ?? undefined,
+      },
       { signal },
     );
   }
@@ -898,6 +850,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       ) {
         return false;
       }
+      if (this.isImplicitLocalCompanionUiEvent(type)) {
+        return true;
+      }
       return this.matchesCurrentDirectoryEvent(event);
     }
 
@@ -912,9 +867,26 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return false;
   }
 
+  private isImplicitLocalCompanionUiEvent(type: string): boolean {
+    if (this.options.renderMode !== "companion") {
+      return false;
+    }
+
+    return (
+      type === "tui.prompt.append" ||
+      type === "tui.command.execute" ||
+      type === "tui.session.select"
+    );
+  }
+
   private handleSseEvent(event: SdkEvent): void {
     const type = this.normalizeEventType(event.type);
     const payload = this.extractEventPayload(event);
+
+    if (type === "message.updated") {
+      this.handleMessageUpdated(payload);
+      return;
+    }
 
     switch (type) {
       case "server.connected":
@@ -1199,8 +1171,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const sessionId = this.extractSessionId(properties);
-    if (!this.syncTrackedSessionFromEvent(sessionId)) {
+    const session = this.extractSessionReference(properties);
+    if (!this.syncTrackedSessionFromEvent(session)) {
       return;
     }
   }
@@ -1210,8 +1182,38 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
+    const session = this.extractSessionReference(properties);
+    this.syncTrackedSessionFromEvent(session, { allowLocalTurnFollow: false });
+  }
+
+  private handleMessageUpdated(properties: unknown): void {
+    if (!isRecord(properties)) {
+      return;
+    }
+
     const sessionId = this.extractSessionId(properties);
-    this.syncTrackedSessionFromEvent(sessionId, { allowLocalTurnFollow: false });
+    if (sessionId && !this.syncTrackedSessionFromEvent(sessionId, { allowLocalTurnFollow: false })) {
+      return;
+    }
+
+    const info = isRecord(properties.info) ? properties.info : undefined;
+    const messageId = typeof info?.id === "string" ? info.id : undefined;
+    const role = info?.role === "user" || info?.role === "assistant" ? info.role : undefined;
+    if (!messageId) {
+      return;
+    }
+
+    const observed = this.getOrCreateObservedOpenCodeMessage(messageId, sessionId);
+    observed.updatedAtMs = Date.now();
+    observed.sessionId = sessionId ?? observed.sessionId;
+    observed.role = role;
+
+    if (role === "assistant") {
+      this.cleanupObservedOpenCodeMessage(messageId);
+      return;
+    }
+
+    this.tryEmitObservedLocalUserMessage(messageId);
   }
 
   private handleMessagePartUpdated(properties: unknown): void {
@@ -1219,11 +1221,24 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
+    const part = isRecord(properties.part) ? properties.part : undefined;
+    if (this.isVisibleTextPart(part)) {
+      this.trackObservedOpenCodeMessagePart({
+        messageId: part.messageID,
+        sessionId: part.sessionID,
+        partId: part.id,
+        snapshotText: typeof part.text === "string" ? part.text : undefined,
+        deltaText: typeof properties.delta === "string" ? properties.delta : undefined,
+      });
+      if (this.observedOpenCodeMessages.get(part.messageID)?.role === "user") {
+        return;
+      }
+    }
+
     if (this.state.status !== "busy") {
       return;
     }
 
-    const part = isRecord(properties.part) ? properties.part : undefined;
     if (!this.isVisibleTextPart(part)) {
       return;
     }
@@ -1254,7 +1269,27 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private handleMessagePartDelta(properties: unknown): void {
-    if (!isRecord(properties) || this.state.status !== "busy") {
+    if (!isRecord(properties)) {
+      return;
+    }
+
+    if (this.state.status !== "busy") {
+      const sessionIdForTrackedMessage =
+        typeof properties.sessionID === "string" ? properties.sessionID : undefined;
+      const messageIdForTrackedMessage =
+        typeof properties.messageID === "string" ? properties.messageID : undefined;
+      const partIdForTrackedMessage =
+        typeof properties.partID === "string" ? properties.partID : undefined;
+      const deltaForTrackedMessage =
+        typeof properties.delta === "string" ? properties.delta : undefined;
+      if (messageIdForTrackedMessage && partIdForTrackedMessage && deltaForTrackedMessage) {
+        this.trackObservedOpenCodeMessagePart({
+          messageId: messageIdForTrackedMessage,
+          sessionId: sessionIdForTrackedMessage,
+          partId: partIdForTrackedMessage,
+          deltaText: deltaForTrackedMessage,
+        });
+      }
       return;
     }
 
@@ -1271,6 +1306,18 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         ? properties.sessionID
         : undefined;
     const partId = this.extractPartId(properties);
+
+    if (typeof properties.messageID === "string" && partId && delta) {
+      this.trackObservedOpenCodeMessagePart({
+        messageId: properties.messageID,
+        sessionId,
+        partId,
+        deltaText: delta,
+      });
+      if (this.observedOpenCodeMessages.get(properties.messageID)?.role === "user") {
+        return;
+      }
+    }
 
     if (!delta || !partId || !this.syncTrackedSessionFromEvent(sessionId)) {
       return;
@@ -1304,6 +1351,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     this.pendingLocalPrompt += text;
+    this.maybeNotifyLocalPromptDraftStarted();
   }
 
   private handleTuiCommandExecute(properties: unknown): void {
@@ -1319,6 +1367,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     switch (command) {
       case "prompt.clear":
         this.pendingLocalPrompt = "";
+        this.localPromptNoticeSent = false;
         return;
       case "prompt.submit":
         this.handleLocalPromptSubmit();
@@ -1338,8 +1387,27 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
+    if (sessionId === this.suppressedTuiSessionSelectId) {
+      this.suppressedTuiSessionSelectId = null;
+      return;
+    }
+
     this.pendingLocalPrompt = "";
-    this.followLocalSession(sessionId);
+    this.localPromptNoticeSent = false;
+    this.logDebug(`[opencode-adapter:local-follow] tui.session.select ${sessionId}`);
+    this.switchSharedSession(
+      {
+        id: sessionId,
+        workspaceID: this.extractWorkspaceId(properties) ?? undefined,
+      },
+      {
+        source: "local",
+        reason: "local_follow",
+        notify: true,
+        clearTrackedTurn: true,
+        syncVisible: true,
+      },
+    );
   }
 
   private handleCommandExecuted(properties: unknown): void {
@@ -1354,7 +1422,20 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     const sessionId = this.extractSessionId(properties);
     if (sessionId) {
-      this.followLocalSession(sessionId);
+      this.logDebug(`[opencode-adapter:local-follow] command.executed ${name} -> ${sessionId}`);
+      this.switchSharedSession(
+        {
+          id: sessionId,
+          workspaceID: this.extractWorkspaceId(properties) ?? undefined,
+        },
+        {
+          source: "local",
+          reason: "local_follow",
+          notify: true,
+          clearTrackedTurn: true,
+          syncVisible: true,
+        },
+      );
     }
   }
 
@@ -1396,6 +1477,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private handleLocalPromptSubmit(): void {
     const prompt = normalizeOutput(this.pendingLocalPrompt).trim();
     this.pendingLocalPrompt = "";
+    this.localPromptNoticeSent = false;
     if (!prompt) {
       return;
     }
@@ -1408,6 +1490,150 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     });
   }
 
+  private trackObservedOpenCodeMessagePart(params: {
+    messageId: string;
+    sessionId?: string;
+    partId: string;
+    snapshotText?: string;
+    deltaText?: string;
+  }): void {
+    const observed = this.getOrCreateObservedOpenCodeMessage(params.messageId, params.sessionId);
+    observed.updatedAtMs = Date.now();
+    observed.sessionId = params.sessionId ?? observed.sessionId;
+
+    let chunk = "";
+    if (typeof params.snapshotText === "string") {
+      chunk = this.consumeObservedUserPartSnapshot(params.partId, params.snapshotText);
+    } else if (typeof params.deltaText === "string") {
+      chunk = this.consumeObservedUserPartDelta(params.partId, params.deltaText);
+    }
+
+    if (!chunk) {
+      return;
+    }
+
+    let partIds = this.observedUserMessagePartIds.get(params.messageId);
+    if (!partIds) {
+      partIds = new Set<string>();
+      this.observedUserMessagePartIds.set(params.messageId, partIds);
+    }
+    partIds.add(params.partId);
+    observed.text = normalizeOutput(`${observed.text}${chunk}`);
+    this.tryEmitObservedLocalUserMessage(params.messageId);
+  }
+
+  private getOrCreateObservedOpenCodeMessage(
+    messageId: string,
+    sessionId?: string,
+  ): ObservedOpenCodeMessage {
+    const existing = this.observedOpenCodeMessages.get(messageId);
+    if (existing) {
+      if (sessionId) {
+        existing.sessionId = sessionId;
+      }
+      return existing;
+    }
+
+    const created: ObservedOpenCodeMessage = {
+      sessionId: sessionId ?? this.activeSessionId ?? "",
+      text: "",
+      emitted: false,
+      updatedAtMs: Date.now(),
+    };
+    this.observedOpenCodeMessages.set(messageId, created);
+    return created;
+  }
+
+  private tryEmitObservedLocalUserMessage(messageId: string): void {
+    const observed = this.observedOpenCodeMessages.get(messageId);
+    if (!observed || observed.role !== "user" || observed.emitted) {
+      return;
+    }
+
+    const text = normalizeOutput(observed.text).trim();
+    if (!text) {
+      return;
+    }
+
+    observed.emitted = true;
+    if (this.shouldSuppressWechatMirroredPrompt(observed.sessionId, text)) {
+      this.cleanupObservedOpenCodeMessage(messageId);
+      return;
+    }
+    if (this.wasRecentlyMirroredLocalPrompt(text)) {
+      this.cleanupObservedOpenCodeMessage(messageId);
+      return;
+    }
+
+    this.outputBatcher.clear();
+    this.clearStreamedPartState();
+    this.beginTrackedTurn(text, "local", {
+      busyMessage: "OpenCode is busy with a local terminal turn.",
+      emitMirroredUserInput: true,
+    });
+    this.cleanupObservedOpenCodeMessage(messageId);
+  }
+
+  private recordPendingWechatPromptMirrorSuppression(sessionId: string, text: string): void {
+    const normalizedText = normalizeOutput(text).trim();
+    if (!sessionId || !normalizedText) {
+      return;
+    }
+
+    const cutoff = Date.now() - OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS;
+    for (let index = this.pendingWechatPromptMirrorSuppressions.length - 1; index >= 0; index -= 1) {
+      if (this.pendingWechatPromptMirrorSuppressions[index]!.createdAtMs < cutoff) {
+        this.pendingWechatPromptMirrorSuppressions.splice(index, 1);
+      }
+    }
+    this.pendingWechatPromptMirrorSuppressions.push({
+      sessionId,
+      text: normalizedText,
+      createdAtMs: Date.now(),
+    });
+  }
+
+  private shouldSuppressWechatMirroredPrompt(sessionId: string, text: string): boolean {
+    const normalizedText = normalizeOutput(text).trim();
+    if (!sessionId || !normalizedText) {
+      return false;
+    }
+
+    const cutoff = Date.now() - OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS;
+    for (let index = this.pendingWechatPromptMirrorSuppressions.length - 1; index >= 0; index -= 1) {
+      const pending = this.pendingWechatPromptMirrorSuppressions[index]!;
+      if (pending.createdAtMs < cutoff) {
+        this.pendingWechatPromptMirrorSuppressions.splice(index, 1);
+        continue;
+      }
+      if (pending.sessionId === sessionId && pending.text === normalizedText) {
+        this.pendingWechatPromptMirrorSuppressions.splice(index, 1);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private wasRecentlyMirroredLocalPrompt(text: string): boolean {
+    const normalizedText = normalizeOutput(text).trim();
+    if (!normalizedText) {
+      return false;
+    }
+
+    if (
+      this.state.activeTurnOrigin === "local" &&
+      this.hasAcceptedInput &&
+      this.lastMirroredLocalPrompt &&
+      this.lastMirroredLocalPrompt.createdAtMs >= Date.now() - OPENCODE_RECENT_LOCAL_PROMPT_TTL_MS &&
+      this.lastMirroredLocalPrompt.text === normalizedText
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
   /* ---- Session helpers ---- */
 
   private unwrapOrThrow<T>(result: SdkResult<T>): T {
@@ -1417,19 +1643,11 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return result.data as T;
   }
 
-  private async ensureSession(): Promise<string> {
+  private async ensureSession(): Promise<SdkSession> {
     if (this.activeSessionId && this.client) {
-      // Verify the session still exists.
-      try {
-        const result = await this.client.session.get({
-          sessionID: this.activeSessionId,
-          directory: this.options.cwd,
-        });
-        if (result.error === undefined) {
-          return this.activeSessionId;
-        }
-      } catch {
-        // Session doesn't exist anymore, create a new one.
+      const session = await this.getSessionForCurrentDirectory(this.activeSessionId);
+      if (session) {
+        return session;
       }
       this.activeSessionId = null;
     }
@@ -1439,10 +1657,12 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const session = this.unwrapOrThrow(
-      await this.client.session.create({ directory: this.options.cwd }),
+      await this.client.session.create({
+        directory: this.options.cwd,
+        workspace: this.activeWorkspaceId ?? undefined,
+      }),
     );
-    this.assignActiveSession(session.id);
-    return session.id;
+    return session;
   }
 
   private beginTrackedTurn(
@@ -1462,6 +1682,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.setStatus("busy", options.busyMessage);
 
     if (options.emitMirroredUserInput && origin === "local") {
+      this.lastMirroredLocalPrompt = {
+        text: normalizeOutput(text).trim(),
+        createdAtMs: Date.now(),
+      };
       this.emit({
         type: "mirrored_user_input",
         text,
@@ -1489,12 +1713,21 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private settleTurnState(): void {
     this.clearWechatWorkingNotice(true);
     this.pendingLocalPrompt = "";
+    this.localPromptNoticeSent = false;
     this.clearPendingPermissionState();
     this.state.activeTurnOrigin = undefined;
     this.hasAcceptedInput = false;
     this.currentPreview = "(idle)";
     this.outputBatcher.clear();
     this.clearStreamedPartState();
+  }
+
+  private clearObservedMessageTracking(): void {
+    this.observedOpenCodeMessages.clear();
+    this.observedUserTextByPartId.clear();
+    this.observedUserMessagePartIds.clear();
+    this.pendingWechatPromptMirrorSuppressions.length = 0;
+    this.lastMirroredLocalPrompt = null;
   }
 
   private clearTrackedTurnForLocalSessionSwitch(): void {
@@ -1604,13 +1837,19 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.eventSink(event);
   }
 
-  private assignActiveSession(sessionId: string | null | undefined): boolean {
+  private assignActiveSession(
+    session: { id: string; workspaceID?: string } | string | null | undefined,
+  ): boolean {
+    const sessionId = typeof session === "string" ? session : session?.id;
     if (!sessionId) {
       return false;
     }
 
     const changed = sessionId !== this.activeSessionId;
     this.activeSessionId = sessionId;
+    if (typeof session !== "string" && session?.workspaceID) {
+      this.activeWorkspaceId = session.workspaceID;
+    }
     this.state.sharedSessionId = sessionId;
     this.state.sharedThreadId = sessionId;
     this.state.activeRuntimeSessionId = sessionId;
@@ -1618,37 +1857,67 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private syncTrackedSessionFromEvent(
-    sessionId: string | null | undefined,
+    session: { id: string; workspaceID?: string } | string | null | undefined,
     options: {
       allowLocalTurnFollow?: boolean;
     } = {},
   ): boolean {
+    const sessionId = typeof session === "string" ? session : session?.id;
     if (!sessionId) {
       return false;
     }
 
     if (sessionId === this.activeSessionId) {
-      this.assignActiveSession(sessionId);
+      this.assignActiveSession(session);
       return true;
     }
 
     if (options.allowLocalTurnFollow !== false && this.shouldFollowLocalTurnSession(sessionId)) {
-      this.assignActiveSession(sessionId);
-      this.recordSessionSwitch(sessionId, "local", "local_turn", true);
+      this.switchSharedSession(session, {
+        source: "local",
+        reason: "local_turn",
+        notify: true,
+        syncVisible: true,
+      });
       return true;
     }
 
     return false;
   }
 
-  private extractSessionId(properties: Record<string, unknown>): string | null {
+  private extractSessionReference(
+    properties: Record<string, unknown>,
+  ): { id: string; workspaceID?: string } | null {
     if (typeof properties.sessionID === "string") {
-      return properties.sessionID;
+      return {
+        id: properties.sessionID,
+        workspaceID: this.extractWorkspaceId(properties) ?? undefined,
+      };
     }
 
-    const info = properties.info;
-    if (isRecord(info) && typeof info.id === "string") {
-      return info.id;
+    const info = isRecord(properties.info) ? properties.info : undefined;
+    if (typeof info?.id === "string") {
+      return {
+        id: info.id,
+        workspaceID: this.extractWorkspaceId(info) ?? this.extractWorkspaceId(properties) ?? undefined,
+      };
+    }
+
+    return null;
+  }
+
+  private extractSessionId(properties: Record<string, unknown>): string | null {
+    return this.extractSessionReference(properties)?.id ?? null;
+  }
+
+  private extractWorkspaceId(properties: Record<string, unknown>): string | null {
+    if (typeof properties.workspaceID === "string") {
+      return properties.workspaceID;
+    }
+
+    const info = isRecord(properties.info) ? properties.info : undefined;
+    if (typeof info?.workspaceID === "string") {
+      return info.workspaceID;
     }
 
     return null;
@@ -1662,15 +1931,85 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     );
   }
 
-  private followLocalSession(sessionId: string): boolean {
-    const changed = this.assignActiveSession(sessionId);
-    if (!changed) {
+  private switchSharedSession(
+    session: { id: string; workspaceID?: string } | string,
+    options: {
+      source: BridgeSessionSwitchSource;
+      reason: BridgeSessionSwitchReason;
+      notify?: boolean;
+      clearTrackedTurn?: boolean;
+      syncVisible?: boolean;
+      forceVisibleSync?: boolean;
+    },
+  ): boolean {
+    const sessionId = typeof session === "string" ? session : session.id;
+    if (!sessionId) {
       return false;
     }
 
-    this.clearTrackedTurnForLocalSessionSwitch();
-    this.recordSessionSwitch(sessionId, "local", "local_follow", true);
-    return true;
+    const changed = this.assignActiveSession(session);
+    if (changed && options.clearTrackedTurn) {
+      this.clearTrackedTurnForLocalSessionSwitch();
+    }
+    if (changed) {
+      this.recordSessionSwitch(sessionId, options.source, options.reason, options.notify);
+    }
+    if (options.syncVisible !== false && (changed || options.forceVisibleSync)) {
+      void this.syncVisibleSessionSelection(typeof session === "string" ? { id: session } : session);
+    }
+    return changed;
+  }
+
+  private async syncVisibleSessionToShared(options: { force?: boolean } = {}): Promise<void> {
+    if (!this.activeSessionId) {
+      return;
+    }
+
+    await this.syncVisibleSessionSelection(
+      {
+        id: this.activeSessionId,
+        workspaceID: this.activeWorkspaceId ?? undefined,
+      },
+      { force: options.force },
+    );
+  }
+
+  private async syncVisibleSessionSelection(
+    session: { id: string; workspaceID?: string },
+    options: {
+      force?: boolean;
+    } = {},
+  ): Promise<void> {
+    if (
+      !this.client?.tui ||
+      this.options.renderMode !== "companion" ||
+      (!options.force && session.id === this.suppressedTuiSessionSelectId)
+    ) {
+      return;
+    }
+
+    this.suppressedTuiSessionSelectId = session.id;
+    this.logDebug(
+      `[opencode-adapter:tui] selectSession session=${session.id} workspace=${session.workspaceID ?? this.activeWorkspaceId ?? "(none)"}`,
+    );
+
+    try {
+      const result = await this.client.tui.selectSession({
+        directory: this.options.cwd,
+        workspace: session.workspaceID ?? this.activeWorkspaceId ?? undefined,
+        sessionID: session.id,
+      });
+      if (result.error !== undefined) {
+        throw result.error;
+      }
+    } catch (err) {
+      if (this.suppressedTuiSessionSelectId === session.id) {
+        this.suppressedTuiSessionSelectId = null;
+      }
+      this.logDebug(
+        `[opencode-adapter:tui] selectSession failed for ${session.id}: ${describeUnknownError(err)}`,
+      );
+    }
   }
 
   private isLocalSessionNavigationCommand(command: string | undefined): boolean {
@@ -1697,22 +2036,42 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private matchesCurrentDirectoryEvent(event: SdkEvent): boolean {
-    if (typeof (event as { directory?: unknown }).directory === "string") {
-      return (
-        this.normalizeDirectory((event as { directory: string }).directory) ===
-        this.normalizeDirectory(this.options.cwd)
-      );
+    const payload = this.extractEventPayload(event);
+    const wrappedDirectory =
+      typeof (event as { directory?: unknown }).directory === "string"
+        ? (event as { directory: string }).directory
+        : undefined;
+    if (wrappedDirectory) {
+      const matchesWrappedDirectory =
+        this.normalizeDirectory(wrappedDirectory) === this.normalizeDirectory(this.options.cwd);
+      if (!matchesWrappedDirectory) {
+        return false;
+      }
     }
 
-    const payload = this.extractEventPayload(event);
     if (!isRecord(payload)) {
+      return Boolean(wrappedDirectory);
+    }
+
+    const directory = this.extractSessionDirectory(payload);
+    if (directory) {
+      const matchesDirectory =
+        this.normalizeDirectory(directory) === this.normalizeDirectory(this.options.cwd);
+      if (!matchesDirectory) {
+        return false;
+      }
+    }
+
+    const workspaceId = this.extractWorkspaceId(payload);
+    if (workspaceId && this.activeWorkspaceId && workspaceId !== this.activeWorkspaceId) {
+      this.logDebug(
+        `[opencode-adapter:sse] Ignored workspace mismatch session=${this.extractSessionId(payload) ?? "(unknown)"} eventWorkspace=${workspaceId} activeWorkspace=${this.activeWorkspaceId}`,
+      );
       return false;
     }
 
-    const info = isRecord(payload.info) ? payload.info : undefined;
-    const directory = typeof info?.directory === "string" ? info.directory : undefined;
-    if (directory) {
-      return this.normalizeDirectory(directory) === this.normalizeDirectory(this.options.cwd);
+    if (wrappedDirectory || directory || workspaceId) {
+      return true;
     }
 
     const sessionId = this.extractSessionId(payload);
@@ -1720,6 +2079,31 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       sessionId &&
         (sessionId === this.activeSessionId || sessionId === this.state.sharedSessionId),
     );
+  }
+
+  private extractSessionDirectory(properties: Record<string, unknown>): string | null {
+    if (typeof properties.directory === "string") {
+      return properties.directory;
+    }
+
+    const info = isRecord(properties.info) ? properties.info : undefined;
+    if (typeof info?.directory === "string") {
+      return info.directory;
+    }
+
+    return null;
+  }
+
+  private isCurrentDirectorySession(session: SdkSession): boolean {
+    if (this.normalizeDirectory(session.directory) !== this.normalizeDirectory(this.options.cwd)) {
+      return false;
+    }
+
+    if (session.workspaceID && this.activeWorkspaceId && session.workspaceID !== this.activeWorkspaceId) {
+      return false;
+    }
+
+    return true;
   }
 
   private normalizeDirectory(directory: string): string {
@@ -1816,6 +2200,50 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return nextChunk;
   }
 
+  private consumeObservedUserPartSnapshot(partId: string, text: string): string {
+    const nextText = normalizeOutput(text);
+    if (!nextText) {
+      return "";
+    }
+
+    const previousText = this.observedUserTextByPartId.get(partId) ?? "";
+    if (nextText === previousText) {
+      return "";
+    }
+
+    this.observedUserTextByPartId.set(partId, nextText);
+    if (!previousText) {
+      return nextText;
+    }
+
+    if (nextText.startsWith(previousText)) {
+      return nextText.slice(previousText.length);
+    }
+
+    const sharedPrefixLength = this.getSharedPrefixLength(previousText, nextText);
+    return nextText.slice(sharedPrefixLength);
+  }
+
+  private consumeObservedUserPartDelta(partId: string, delta: string): string {
+    const nextChunk = normalizeOutput(delta);
+    if (!nextChunk) {
+      return "";
+    }
+
+    const previousText = this.observedUserTextByPartId.get(partId) ?? "";
+    if (nextChunk === previousText || previousText.endsWith(nextChunk)) {
+      return "";
+    }
+
+    if (previousText && nextChunk.startsWith(previousText)) {
+      this.observedUserTextByPartId.set(partId, nextChunk);
+      return nextChunk.slice(previousText.length);
+    }
+
+    this.observedUserTextByPartId.set(partId, `${previousText}${nextChunk}`);
+    return nextChunk;
+  }
+
   private pushVisibleOutput(text: string): void {
     if (!text) {
       return;
@@ -1827,6 +2255,17 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private clearStreamedPartState(): void {
     this.emittedTextByPartId.clear();
+  }
+
+  private cleanupObservedOpenCodeMessage(messageId: string): void {
+    this.observedOpenCodeMessages.delete(messageId);
+    const partIds = this.observedUserMessagePartIds.get(messageId);
+    if (partIds) {
+      for (const partId of partIds) {
+        this.observedUserTextByPartId.delete(partId);
+      }
+      this.observedUserMessagePartIds.delete(messageId);
+    }
   }
 
   private getSharedPrefixLength(left: string, right: string): number {
@@ -1851,6 +2290,84 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
     this.loggedUnknownEventTypes.add(type);
     this.logDebug(`[opencode-adapter:sse] Unknown event: ${type}`);
+  }
+
+  private shouldSkipDuplicateSdkEvent(
+    event: NormalizedSdkEvent,
+    streamName: SdkEventStreamName,
+  ): boolean {
+    const key = this.getDuplicateSdkEventKey(event);
+    if (!key) {
+      return false;
+    }
+
+    const now = Date.now();
+    const cutoff = now - OPENCODE_DUPLICATE_EVENT_TTL_MS;
+    for (const [candidateKey, observed] of this.recentSdkEventObservations.entries()) {
+      if (observed.observedAtMs < cutoff) {
+        this.recentSdkEventObservations.delete(candidateKey);
+      }
+    }
+
+    const previous = this.recentSdkEventObservations.get(key);
+    this.recentSdkEventObservations.set(key, { streamName, observedAtMs: now });
+    return Boolean(previous && previous.streamName !== streamName && previous.observedAtMs >= cutoff);
+  }
+
+  private getDuplicateSdkEventKey(event: NormalizedSdkEvent): string | null {
+    const type = this.normalizeEventType(event.type);
+    const payload = this.extractEventPayload(event);
+    if (!isRecord(payload)) {
+      return null;
+    }
+
+    switch (type) {
+      case "tui.prompt.append": {
+        const text = typeof payload.text === "string" ? payload.text : undefined;
+        return text ? `${type}:${text}` : null;
+      }
+      case "tui.command.execute": {
+        const command = typeof payload.command === "string" ? payload.command : undefined;
+        return command ? `${type}:${command}` : null;
+      }
+      case "tui.session.select": {
+        const sessionId = typeof payload.sessionID === "string" ? payload.sessionID : undefined;
+        return sessionId ? `${type}:${sessionId}` : null;
+      }
+      case "command.executed": {
+        const name = typeof payload.name === "string" ? payload.name : undefined;
+        const sessionId = this.extractSessionId(payload) ?? "";
+        const args = typeof payload.arguments === "string" ? payload.arguments : "";
+        return name ? `${type}:${name}:${sessionId}:${args}` : null;
+      }
+      case "session.created":
+      case "session.updated":
+      case "session.deleted": {
+        const sessionId = this.extractSessionId(payload);
+        return sessionId ? `${type}:${sessionId}` : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  private maybeNotifyLocalPromptDraftStarted(): void {
+    if (this.localPromptNoticeSent) {
+      return;
+    }
+
+    const preview = truncatePreview(normalizeOutput(this.pendingLocalPrompt).trim(), 180);
+    if (!preview) {
+      return;
+    }
+
+    this.localPromptNoticeSent = true;
+    this.emit({
+      type: "notice",
+      text: `OpenCode local draft:\n${preview}`,
+      level: "info",
+      timestamp: nowIso(),
+    });
   }
 
   private setStatus(

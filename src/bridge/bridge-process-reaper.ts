@@ -52,6 +52,16 @@ export function isOpencodeServeCommandLine(commandLine: string): boolean {
   return /\bopencode(?:\.exe|\.cmd|\.bat)?\b.*\bserve\b/i.test(commandLine);
 }
 
+/**
+ * Detects `opencode attach` command lines spawned by the local OpenCode companion.
+ * Matches patterns like:
+ *   opencode attach http://127.0.0.1:12345
+ *   opencode.exe attach http://127.0.0.1:12345 --session ses_123
+ */
+export function isOpencodeAttachCommandLine(commandLine: string): boolean {
+  return /\bopencode(?:\.exe|\.cmd|\.bat)?\b.*\battach\b/i.test(commandLine);
+}
+
 function normalizeBridgeProcessRecord(value: unknown): BridgeProcessRecord | null {
   if (!isRecord(value)) {
     return null;
@@ -209,22 +219,20 @@ export function listPeerBridgeProcesses(currentPid = process.pid): BridgeProcess
 }
 
 /**
- * List all `opencode serve` processes whose parent PID is no longer alive.
- * These are orphaned processes left behind when a bridge crashed or was killed
- * without cleaning up its child `opencode serve` process.
+ * List all managed OpenCode child processes (`serve` and `attach`) whose parent
+ * PID is no longer alive. These are orphaned processes left behind when a bridge
+ * or local companion crashed or was killed without cleaning up its child
+ * OpenCode processes.
  */
 export function listOrphanedOpencodeProcesses(
   currentPid = process.pid,
 ): BridgeProcessRecord[] {
-  const platformList = process.platform === "win32"
-    ? listWindowsBridgeProcesses(currentPid)
-    : listPosixBridgeProcesses(currentPid);
-
-  // We need ALL processes (not just bridge ones), so re-query without the bridge filter.
-  // But to keep it simple, we reuse the Windows/POSIX probes with a broader filter.
   const all = listAllProcessesRaw(currentPid);
   return all.filter((record) => {
-    if (!isOpencodeServeCommandLine(record.commandLine)) {
+    if (
+      !isOpencodeServeCommandLine(record.commandLine) &&
+      !isOpencodeAttachCommandLine(record.commandLine)
+    ) {
       return false;
     }
     if (!record.parentPid) {
@@ -374,10 +382,10 @@ export async function reapPeerBridgeProcesses(params: {
 }
 
 /**
- * Kill orphaned `opencode serve` processes whose parent bridge has already exited.
- * These accumulate when a bridge crashes or is killed without cleaning up
- * its child `opencode serve` process (common on Windows where child processes
- * are not automatically killed when the parent dies).
+ * Kill orphaned managed OpenCode processes (`serve` and `attach`) whose parent
+ * bridge/companion has already exited. These accumulate when a bridge crashes
+ * or is killed without cleaning up its child OpenCode processes (common on
+ * Windows where child processes are not automatically killed when the parent dies).
  */
 export async function reapOrphanedOpencodeProcesses(params: {
   currentPid?: number;

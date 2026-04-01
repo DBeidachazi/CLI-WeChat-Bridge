@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  isOpencodeAttachCommandLine,
   isOpencodeServeCommandLine,
   isWechatBridgeCommandLine,
   parsePosixBridgeProcessProbeOutput,
@@ -30,6 +31,20 @@ describe("bridge peer process reaper", () => {
     expect(isOpencodeServeCommandLine("opencode chat")).toBe(false);
     expect(isOpencodeServeCommandLine("node server.js --port 12345")).toBe(false);
     expect(isOpencodeServeCommandLine("")).toBe(false);
+  });
+
+  test("detects opencode attach command lines", () => {
+    expect(isOpencodeAttachCommandLine("opencode attach http://127.0.0.1:12345")).toBe(true);
+    expect(
+      isOpencodeAttachCommandLine("opencode.exe attach http://127.0.0.1:12345 --session ses_123"),
+    ).toBe(true);
+    expect(
+      isOpencodeAttachCommandLine("opencode.cmd attach http://127.0.0.1:12345 --session 019d2ebf"),
+    ).toBe(true);
+    expect(isOpencodeAttachCommandLine("/usr/local/bin/opencode attach http://127.0.0.1:12345")).toBe(true);
+    expect(isOpencodeAttachCommandLine("opencode serve --port 12345")).toBe(false);
+    expect(isOpencodeAttachCommandLine("node attach.js http://127.0.0.1:12345")).toBe(false);
+    expect(isOpencodeAttachCommandLine("")).toBe(false);
   });
 
   test("parses Windows process probe output and filters non-bridge rows", () => {

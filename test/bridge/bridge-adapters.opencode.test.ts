@@ -22,6 +22,28 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createSdkSessionRecord(
+  id: string,
+  options: {
+    directory?: string;
+    workspaceID?: string;
+    title?: string;
+  } = {},
+) {
+  return {
+    id,
+    projectID: "project_1",
+    workspaceID: options.workspaceID,
+    directory: options.directory ?? process.cwd(),
+    title: options.title ?? id,
+    version: "1",
+    time: {
+      created: Date.now(),
+      updated: Date.now(),
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Factory                                                            */
 /* ------------------------------------------------------------------ */
@@ -307,139 +329,205 @@ describe("OpenCode SSE event dispatch", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  session_diff local session follow                                  */
+/*  visible TUI session sync                                           */
 /* ------------------------------------------------------------------ */
 
-describe("OpenCode session_diff local session follow", () => {
-  test("follows touched session diff files for the current directory", async () => {
+describe("OpenCode visible TUI session sync", () => {
+  test("syncs the restored shared session into the visible TUI", async () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
+      renderMode: "companion",
+      initialSharedSessionId: "session_restore",
     });
-    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
-    adapter.setEventSink((event) => {
-      events.push(
-        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
-      );
-    });
+    const selectSessionCalls: Array<Record<string, unknown>> = [];
     const internal = adapter as unknown as {
       client: {
         session: {
-          get(options: { sessionID: string; directory?: string }): Promise<unknown>;
+          list(): Promise<unknown>;
+          get(options: { sessionID: string }): Promise<unknown>;
         };
-      } | null;
-      activeSessionId: string | null;
-      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
-      handleTouchedSessionDiffSession(sessionId: string): Promise<void>;
+        tui: {
+          selectSession(options?: Record<string, unknown>): Promise<unknown>;
+        };
+      };
+      initializeSessions(): Promise<void>;
+      syncVisibleSessionToShared(options?: { force?: boolean }): Promise<void>;
     };
 
     internal.client = {
       session: {
-        get: async ({ sessionID }) => ({
-          data: {
-            id: sessionID,
-            projectID: "project_1",
-            directory: process.cwd(),
-            title: sessionID,
-            version: "1",
-            time: {
-              created: Date.now(),
-              updated: Date.now(),
-            },
-          },
+        list: async () => ({
+          data: [createSdkSessionRecord("session_live")],
           error: undefined,
           request: {},
           response: {},
         }),
+        get: async ({ sessionID }) => ({
+          data: sessionID === "session_restore" ? createSdkSessionRecord("session_restore") : undefined,
+          error: sessionID === "session_restore" ? undefined : new Error("Session not found"),
+          request: {},
+          response: {},
+        }),
+      },
+      tui: {
+        selectSession: async (options = {}) => {
+          selectSessionCalls.push(options);
+          return {
+            data: true,
+            error: undefined,
+            request: {},
+            response: {},
+          };
+        },
       },
     };
 
-    internal.activeSessionId = "session_old_local";
-    await internal.handleTouchedSessionDiffSession("ses_selected_from_file");
+    await internal.initializeSessions();
+    await internal.syncVisibleSessionToShared({ force: true });
 
-    expect(internal.activeSessionId).toBe("ses_selected_from_file");
-    expect(internal.state.sharedSessionId).toBe("ses_selected_from_file");
-    expect(internal.state.sharedThreadId).toBe("ses_selected_from_file");
-    expect(internal.state.activeRuntimeSessionId).toBe("ses_selected_from_file");
-    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+    expect(selectSessionCalls).toEqual([
       expect.objectContaining({
-        sessionId: "ses_selected_from_file",
-        source: "local",
-        reason: "local_follow",
+        directory: process.cwd(),
+        sessionID: "session_restore",
       }),
     ]);
   });
 
-  test("ignores touched session diff files from another directory", async () => {
+  test("selects the visible session before sending the first WeChat prompt", async () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
+      renderMode: "companion",
     });
-    const events: Array<{ type: string; sessionId?: string; source?: string; reason?: string }> = [];
-    adapter.setEventSink((event) => {
-      events.push(
-        event as unknown as { type: string; sessionId?: string; source?: string; reason?: string },
-      );
-    });
+    const calls: string[] = [];
+    let promptAsyncOptions: Record<string, unknown> | null = null;
+    let selectSessionOptions: Record<string, unknown> | null = null;
     const internal = adapter as unknown as {
       client: {
         session: {
-          get(options: { sessionID: string; directory?: string }): Promise<unknown>;
+          create(options?: Record<string, unknown>): Promise<unknown>;
+          promptAsync(options?: Record<string, unknown>): Promise<unknown>;
         };
-      } | null;
-      activeSessionId: string | null;
-      state: { sharedSessionId?: string; sharedThreadId?: string; activeRuntimeSessionId?: string };
-      handleTouchedSessionDiffSession(sessionId: string): Promise<void>;
+        tui: {
+          selectSession(options?: Record<string, unknown>): Promise<unknown>;
+        };
+      };
     };
 
     internal.client = {
       session: {
-        get: async ({ sessionID }) => ({
-          data: {
-            id: sessionID,
-            projectID: "project_1",
-            directory: "C:\\other-workspace",
-            title: sessionID,
-            version: "1",
-            time: {
-              created: Date.now(),
-              updated: Date.now(),
-            },
-          },
-          error: undefined,
-          request: {},
-          response: {},
-        }),
+        create: async () => {
+          calls.push("create");
+          return {
+            data: createSdkSessionRecord("session_wechat_new", { workspaceID: "workspace_1" }),
+            error: undefined,
+            request: {},
+            response: {},
+          };
+        },
+        promptAsync: async (options = {}) => {
+          calls.push("prompt");
+          promptAsyncOptions = options;
+          return {
+            data: undefined,
+            error: undefined,
+            request: {},
+            response: {},
+          };
+        },
+      },
+      tui: {
+        selectSession: async (options = {}) => {
+          calls.push("select");
+          selectSessionOptions = options;
+          return {
+            data: true,
+            error: undefined,
+            request: {},
+            response: {},
+          };
+        },
       },
     };
 
-    internal.activeSessionId = "session_old_local";
-    await internal.handleTouchedSessionDiffSession("ses_other_workspace");
+    await adapter.sendInput("hello from wechat");
 
-    expect(internal.activeSessionId).toBe("session_old_local");
-    expect(internal.state.sharedSessionId).toBeUndefined();
-    expect(events.filter((event) => event.type === "session_switched")).toHaveLength(0);
+    expect(calls).toEqual(["create", "select", "prompt"]);
+    expect(selectSessionOptions).toMatchObject({
+      directory: process.cwd(),
+      sessionID: "session_wechat_new",
+      workspace: "workspace_1",
+    });
+    expect(promptAsyncOptions).toMatchObject({
+      directory: process.cwd(),
+      sessionID: "session_wechat_new",
+      workspace: "workspace_1",
+    });
   });
 
-  test("extracts valid session ids from session_diff filenames", () => {
+  test("drives the visible TUI when a local session switch becomes authoritative", async () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
+      renderMode: "companion",
+    });
+    const events: Array<{ type: string; sessionId?: string }> = [];
+    const selectSessionCalls: Array<Record<string, unknown>> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; sessionId?: string });
     });
     const internal = adapter as unknown as {
-      extractSessionIdFromSessionDiffFile(fileName: string): string | null;
+      client: {
+        tui: {
+          selectSession(options?: Record<string, unknown>): Promise<unknown>;
+        };
+      };
+      activeSessionId: string | null;
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
     };
 
-    expect(internal.extractSessionIdFromSessionDiffFile("ses_abc123.json")).toBe("ses_abc123");
-    expect(
-      internal.extractSessionIdFromSessionDiffFile(
-        "019d2ebf-e51c-77b1-9110-0db944e22696.json",
-      ),
-    ).toBe("019d2ebf-e51c-77b1-9110-0db944e22696");
-    expect(internal.extractSessionIdFromSessionDiffFile("not-a-session.txt")).toBeNull();
+    internal.client = {
+      tui: {
+        selectSession: async (options = {}) => {
+          selectSessionCalls.push(options);
+          return {
+            data: true,
+            error: undefined,
+            request: {},
+            response: {},
+          };
+        },
+      },
+    };
+
+    internal.activeSessionId = "session_old_local";
+    internal.handleSseEvent({
+      type: "command.executed",
+      properties: {
+        name: "session",
+        sessionID: "session_selected_local",
+        arguments: "",
+        workspaceID: "workspace_1",
+      },
+    });
+    await wait(0);
+
+    expect(selectSessionCalls).toEqual([
+      expect.objectContaining({
+        directory: process.cwd(),
+        sessionID: "session_selected_local",
+        workspace: "workspace_1",
+      }),
+    ]);
+    expect(events.filter((event) => event.type === "session_switched")).toEqual([
+      expect.objectContaining({
+        sessionId: "session_selected_local",
+      }),
+    ]);
   });
 });
 
@@ -1119,6 +1207,39 @@ describe("OpenCode session.created handling", () => {
 /* ------------------------------------------------------------------ */
 
 describe("OpenCode local TUI tracking", () => {
+  test("emits a single local draft notice before submit", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; text?: string; level?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; text?: string; level?: string });
+    });
+    const internal = adapter as unknown as {
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.handleSseEvent({ type: "tui.prompt.append", properties: { text: "Review " } });
+    internal.handleSseEvent({ type: "tui.prompt.append", properties: { text: "the bridge flow" } });
+
+    expect(events.filter((event) => event.type === "notice")).toEqual([
+      expect.objectContaining({
+        level: "info",
+        text: "OpenCode local draft:\nReview",
+      }),
+    ]);
+
+    internal.handleSseEvent({ type: "tui.command.execute", properties: { command: "prompt.submit" } });
+
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toEqual([
+      expect.objectContaining({
+        text: "Review the bridge flow",
+      }),
+    ]);
+  });
+
   test("mirrors a submitted local prompt as a local turn", () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
@@ -1156,15 +1277,76 @@ describe("OpenCode local TUI tracking", () => {
     });
   });
 
+  test("deduplicates repeated prompt events across SSE streams", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; text?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; text?: string });
+    });
+    const internal = adapter as unknown as {
+      pendingLocalPrompt: string;
+      normalizeSdkEvent(
+        event: unknown,
+      ): { type: string; properties?: unknown; data?: unknown; directory?: string } | null;
+      shouldSkipDuplicateSdkEvent(
+        event: { type: string; properties?: unknown; data?: unknown; directory?: string },
+        streamName: string,
+      ): boolean;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+    };
+
+    const appendEvent = internal.normalizeSdkEvent({
+      type: "tui.prompt.append",
+      properties: { text: "Review the bridge flow" },
+    });
+    expect(appendEvent).not.toBeNull();
+
+    if (!internal.shouldSkipDuplicateSdkEvent(appendEvent!, "event")) {
+      internal.handleSseEvent(appendEvent!);
+    }
+    if (!internal.shouldSkipDuplicateSdkEvent(appendEvent!, "global-event")) {
+      internal.handleSseEvent(appendEvent!);
+    }
+
+    const submitEvent = internal.normalizeSdkEvent({
+      type: "tui.command.execute",
+      properties: { command: "prompt.submit" },
+    });
+    expect(submitEvent).not.toBeNull();
+
+    if (!internal.shouldSkipDuplicateSdkEvent(submitEvent!, "event")) {
+      internal.handleSseEvent(submitEvent!);
+    }
+    if (!internal.shouldSkipDuplicateSdkEvent(submitEvent!, "global-event")) {
+      internal.handleSseEvent(submitEvent!);
+    }
+
+    expect(internal.pendingLocalPrompt).toBe("");
+    expect(events.filter((event) => event.type === "notice")).toEqual([
+      expect.objectContaining({
+        text: "OpenCode local draft:\nReview the bridge flow",
+      }),
+    ]);
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toEqual([
+      expect.objectContaining({
+        text: "Review the bridge flow",
+      }),
+    ]);
+  });
+
   test("clears the buffered local prompt before submit", () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
     });
-    const events: Array<{ type: string }> = [];
+    const events: Array<{ type: string; text?: string }> = [];
     adapter.setEventSink((event) => {
-      events.push(event as unknown as { type: string });
+      events.push(event as unknown as { type: string; text?: string });
     });
     const internal = adapter as unknown as {
       state: { status: string; activeTurnOrigin?: string };
@@ -1179,7 +1361,12 @@ describe("OpenCode local TUI tracking", () => {
     expect(internal.pendingLocalPrompt).toBe("");
     expect(internal.state.status).toBe("stopped");
     expect(internal.state.activeTurnOrigin).toBeUndefined();
-    expect(events).toHaveLength(0);
+    expect(events.filter((event) => event.type === "notice")).toEqual([
+      expect.objectContaining({
+        text: "OpenCode local draft:\ntemporary draft",
+      }),
+    ]);
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toHaveLength(0);
   });
 
   test("tracks local TUI session selections as local session switches", () => {
@@ -1543,6 +1730,60 @@ describe("OpenCode local TUI tracking", () => {
     expect(internal.shouldHandleSseEvent(globalEvent!, "global-event")).toBe(false);
     expect(events.filter((event) => event.type === "session_switched")).toHaveLength(0);
   });
+
+  test("accepts unscoped global TUI prompt events in companion mode", () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+      renderMode: "companion",
+    });
+    const events: Array<{ type: string; text?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; text?: string });
+    });
+    const internal = adapter as unknown as {
+      normalizeSdkEvent(
+        event: unknown,
+      ): { type: string; properties?: unknown; data?: unknown; directory?: string } | null;
+      shouldHandleSseEvent(
+        event: { type: string; properties?: unknown; data?: unknown; directory?: string },
+        streamName: string,
+      ): boolean;
+      handleSseEvent(event: { type: string; properties?: unknown; data?: unknown }): void;
+    };
+
+    const appendEvent = internal.normalizeSdkEvent({
+      payload: {
+        type: "tui.prompt.append",
+        properties: { text: "Review the bridge flow" },
+      },
+    });
+    expect(appendEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(appendEvent!, "global-event")).toBe(true);
+    internal.handleSseEvent(appendEvent!);
+
+    const submitEvent = internal.normalizeSdkEvent({
+      payload: {
+        type: "tui.command.execute",
+        properties: { command: "prompt.submit" },
+      },
+    });
+    expect(submitEvent).not.toBeNull();
+    expect(internal.shouldHandleSseEvent(submitEvent!, "global-event")).toBe(true);
+    internal.handleSseEvent(submitEvent!);
+
+    expect(events.filter((event) => event.type === "notice")).toEqual([
+      expect.objectContaining({
+        text: "OpenCode local draft:\nReview the bridge flow",
+      }),
+    ]);
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toEqual([
+      expect.objectContaining({
+        text: "Review the bridge flow",
+      }),
+    ]);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -1812,29 +2053,116 @@ describe("OpenCode message.part.updated handling", () => {
     expect(internal.outputBatcher.getRecentSummary(500)).toBe("Hello world");
   });
 
-  test("ignores message.updated events (not used for text)", () => {
+  test("mirrors local user messages discovered from message events", () => {
     const adapter = new OpenCodeServerAdapter({
       kind: "opencode",
       command: "opencode",
       cwd: process.cwd(),
     });
-    const events: Array<{ type: string }> = [];
+    const events: Array<{ type: string; text?: string; origin?: string; status?: string }> = [];
     adapter.setEventSink((event) => {
-      events.push(event as unknown as { type: string });
+      events.push(
+        event as unknown as { type: string; text?: string; origin?: string; status?: string },
+      );
     });
     const internal = adapter as unknown as {
-      state: { status: string; lastOutputAt?: string };
+      state: { status: string; activeTurnOrigin?: string };
+      activeSessionId: string | null;
       handleSseEvent(event: { type: string; properties?: unknown }): void;
     };
 
-    internal.state.status = "busy";
+    internal.activeSessionId = "session_local_1";
 
     internal.handleSseEvent({
       type: "message.updated",
-      properties: { info: { id: "m1", text: "Hello" } },
+      properties: {
+        sessionID: "session_local_1",
+        info: { id: "m_user_local_1", sessionID: "session_local_1", role: "user" },
+      },
+    });
+    internal.handleSseEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "p_user_local_1",
+          sessionID: "session_local_1",
+          messageID: "m_user_local_1",
+          type: "text",
+          text: "hello from local opencode",
+        },
+      },
     });
 
-    expect(internal.state.lastOutputAt).toBeUndefined();
+    expect(internal.state.status).toBe("busy");
+    expect(internal.state.activeTurnOrigin).toBe("local");
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toEqual([
+      expect.objectContaining({
+        text: "hello from local opencode",
+        origin: "local",
+      }),
+    ]);
+  });
+
+  test("does not mirror wechat-origin user messages back to WeChat", async () => {
+    const adapter = new OpenCodeServerAdapter({
+      kind: "opencode",
+      command: "opencode",
+      cwd: process.cwd(),
+    });
+    const events: Array<{ type: string; text?: string; origin?: string }> = [];
+    adapter.setEventSink((event) => {
+      events.push(event as unknown as { type: string; text?: string; origin?: string });
+    });
+    const internal = adapter as unknown as {
+      client: {
+        session: {
+          create(options?: Record<string, unknown>): Promise<unknown>;
+          promptAsync(options?: Record<string, unknown>): Promise<unknown>;
+        };
+      };
+      handleSseEvent(event: { type: string; properties?: unknown }): void;
+    };
+
+    internal.client = {
+      session: {
+        create: async () => ({
+          data: createSdkSessionRecord("session_wechat_1"),
+          error: undefined,
+          request: {},
+          response: {},
+        }),
+        promptAsync: async () => ({
+          data: undefined,
+          error: undefined,
+          request: {},
+          response: {},
+        }),
+      },
+    };
+
+    await adapter.sendInput("hello from wechat");
+
+    internal.handleSseEvent({
+      type: "message.updated",
+      properties: {
+        sessionID: "session_wechat_1",
+        info: { id: "m_user_wechat_1", sessionID: "session_wechat_1", role: "user" },
+      },
+    });
+    internal.handleSseEvent({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "p_user_wechat_1",
+          sessionID: "session_wechat_1",
+          messageID: "m_user_wechat_1",
+          type: "text",
+          text: "hello from wechat",
+        },
+      },
+    });
+
+    expect(events.filter((event) => event.type === "mirrored_user_input")).toHaveLength(0);
   });
 });
 
