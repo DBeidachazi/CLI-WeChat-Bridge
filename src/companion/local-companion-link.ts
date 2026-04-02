@@ -23,6 +23,13 @@ export type LocalCompanionCommand =
   | { command: "dispose" }
   | { command: "resolve_approval"; action: "confirm" | "deny" };
 
+export type LocalCompanionCloseReason =
+  | "bridge_dispose"
+  | "companion_shutdown"
+  | "fatal_error"
+  | "signal"
+  | "worker_exit";
+
 export type LocalCompanionEndpoint = {
   instanceId: string;
   kind: BridgeAdapterKind;
@@ -51,6 +58,11 @@ export type LocalCompanionMessage =
     }
   | {
       type: "hello_ack";
+    }
+  | {
+      type: "closing";
+      reason: LocalCompanionCloseReason;
+      exitCode?: number;
     }
   | {
       type: "request";
@@ -187,8 +199,16 @@ export function clearLocalCompanionEndpoint(cwd: string, instanceId?: string): v
 export function sendLocalCompanionMessage(
   socket: net.Socket,
   message: LocalCompanionMessage,
-): void {
-  socket.write(`${JSON.stringify(message)}\n`);
+): boolean {
+  if (socket.destroyed || socket.writableEnded) {
+    return false;
+  }
+
+  try {
+    return socket.write(`${JSON.stringify(message)}\n`);
+  } catch {
+    return false;
+  }
 }
 
 export function attachLocalCompanionMessageListener(

@@ -7,6 +7,7 @@ import {
   clearLocalCompanionEndpoint,
   sendLocalCompanionMessage,
   writeLocalCompanionEndpoint,
+  type LocalCompanionCloseReason,
   type LocalCompanionCommand,
   type LocalCompanionEndpoint,
   type LocalCompanionMessage,
@@ -14,6 +15,7 @@ import {
 import type {
   ApprovalRequest,
   BridgeAdapter,
+  BridgeAdapterKind,
   BridgeAdapterState,
   BridgeEvent,
   BridgeLifecycleMode,
@@ -38,6 +40,7 @@ const {
   buildPtySpawnOptions,
   getLocalCompanionCommandName,
   getSharedSessionIdFromAdapterState,
+  LOCAL_COMPANION_RECONNECT_GRACE_MS,
   resolveSpawnTarget,
 } = shared;
 
@@ -58,6 +61,8 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     }
   >();
   private shuttingDown = false;
+  private expectedCloseReason: LocalCompanionCloseReason | null = null;
+  private reconnectShutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: AdapterOptions) {
     this.options = options;
@@ -92,6 +97,8 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     }
 
     this.shuttingDown = false;
+    this.expectedCloseReason = null;
+    this.clearReconnectShutdownTimer();
     this.setStatus(
       "starting",
       `Waiting for manual ${this.options.kind} companion connection. Run "${getLocalCompanionCommandName(this.options.kind)}" in a second terminal for this directory.`,
@@ -176,6 +183,8 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
 
   async dispose(): Promise<void> {
     this.shuttingDown = true;
+    this.expectedCloseReason = null;
+    this.clearReconnectShutdownTimer();
     this.rejectPendingRequests(`${this.options.kind} companion proxy is shutting down.`);
     clearLocalCompanionEndpoint(this.options.cwd, this.endpoint?.instanceId);
 
@@ -234,6 +243,8 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
         }
 
         authenticated = true;
+        this.clearReconnectShutdownTimer();
+        this.expectedCloseReason = null;
         this.socket = socket;
         this.detachMessageListener = detachListener;
         sendLocalCompanionMessage(socket, { type: "hello_ack" });
@@ -245,23 +256,11 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
 
     socket.once("close", () => {
       if (this.socket === socket) {
+        const expectedCloseReason = this.expectedCloseReason;
+        this.expectedCloseReason = null;
         this.detachPanelSocket();
         if (!this.shuttingDown) {
-          if (shouldStopBridgeAfterCompanionDisconnect(this.options.lifecycle)) {
-            const message = `${this.options.kind} companion disconnected. Stopping transient bridge bound to ${getLocalCompanionCommandName(this.options.kind)}.`;
-            this.setStatus("stopped", message);
-            this.eventSink({
-              type: "shutdown_requested",
-              reason: "companion_disconnected",
-              message,
-              timestamp: nowIso(),
-            });
-            return;
-          }
-          this.setStatus(
-            "starting",
-            `${this.options.kind} companion disconnected. Run "${getLocalCompanionCommandName(this.options.kind)}" again in a second terminal for this directory.`,
-          );
+          this.handleCompanionDisconnect(expectedCloseReason);
         }
       }
     });
@@ -272,6 +271,9 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
 
   private handlePanelMessage(message: LocalCompanionMessage): void {
     switch (message.type) {
+      case "closing":
+        this.expectedCloseReason = message.reason;
+        return;
       case "event":
         this.eventSink(message.event);
         return;
@@ -353,6 +355,70 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     this.state.activeTurnOrigin = undefined;
   }
 
+  private handleCompanionDisconnect(
+    expectedCloseReason: LocalCompanionCloseReason | null,
+  ): void {
+    const disposition = getCompanionDisconnectDisposition({
+      kind: this.options.kind,
+      lifecycle: this.options.lifecycle,
+      expectedClose: isExpectedLocalCompanionClose(expectedCloseReason),
+      reconnectGraceMs: LOCAL_COMPANION_RECONNECT_GRACE_MS,
+    });
+
+    if (disposition.action === "shutdown") {
+      this.clearReconnectShutdownTimer();
+      this.setStatus("stopped", disposition.message);
+      this.eventSink({
+        type: "shutdown_requested",
+        reason: disposition.shutdownReason,
+        message: disposition.message,
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
+    if (disposition.action === "wait_for_reconnect") {
+      this.setStatus("starting", disposition.message);
+      this.armReconnectShutdownTimer();
+      return;
+    }
+
+    this.clearReconnectShutdownTimer();
+    this.setStatus("starting", disposition.message);
+  }
+
+  private armReconnectShutdownTimer(): void {
+    this.clearReconnectShutdownTimer();
+    this.reconnectShutdownTimer = setTimeout(() => {
+      this.reconnectShutdownTimer = null;
+      if (this.shuttingDown || this.socket) {
+        return;
+      }
+
+      const message = buildCompanionReconnectTimeoutMessage({
+        kind: this.options.kind,
+        reconnectGraceMs: LOCAL_COMPANION_RECONNECT_GRACE_MS,
+      });
+      this.setStatus("stopped", message);
+      this.eventSink({
+        type: "shutdown_requested",
+        reason: "companion_reconnect_timeout",
+        message,
+        timestamp: nowIso(),
+      });
+    }, LOCAL_COMPANION_RECONNECT_GRACE_MS);
+    this.reconnectShutdownTimer.unref?.();
+  }
+
+  private clearReconnectShutdownTimer(): void {
+    if (!this.reconnectShutdownTimer) {
+      return;
+    }
+
+    clearTimeout(this.reconnectShutdownTimer);
+    this.reconnectShutdownTimer = null;
+  }
+
   private setStatus(status: BridgeAdapterState["status"], message?: string): void {
     this.state.status = status;
     this.eventSink({
@@ -399,6 +465,70 @@ export function shouldStopBridgeAfterCompanionDisconnect(
   lifecycle: BridgeLifecycleMode | undefined,
 ): boolean {
   return lifecycle === "companion_bound";
+}
+
+export function isExpectedLocalCompanionClose(
+  reason: LocalCompanionCloseReason | null | undefined,
+): boolean {
+  return typeof reason === "string" && reason.length > 0;
+}
+
+export type CompanionDisconnectDisposition =
+  | {
+      action: "shutdown";
+      message: string;
+      shutdownReason: "companion_closed";
+    }
+  | {
+      action: "wait_for_reconnect";
+      message: string;
+    }
+  | {
+      action: "await_manual_reconnect";
+      message: string;
+    };
+
+export function buildCompanionReconnectTimeoutMessage(params: {
+  kind: BridgeAdapterKind;
+  reconnectGraceMs: number;
+}): string {
+  return `${params.kind} companion did not reconnect within ${Math.ceil(params.reconnectGraceMs / 1000)}s. Stopping transient bridge bound to ${getLocalCompanionCommandName(params.kind)}.`;
+}
+
+export function getCompanionDisconnectDisposition(params: {
+  kind: BridgeAdapterKind;
+  lifecycle: BridgeLifecycleMode | undefined;
+  expectedClose: boolean;
+  reconnectGraceMs: number;
+}): CompanionDisconnectDisposition {
+  const commandName = getLocalCompanionCommandName(params.kind);
+
+  if (shouldStopBridgeAfterCompanionDisconnect(params.lifecycle)) {
+    if (params.expectedClose) {
+      return {
+        action: "shutdown",
+        shutdownReason: "companion_closed",
+        message: `${params.kind} companion closed. Stopping transient bridge bound to ${commandName}.`,
+      };
+    }
+
+    return {
+      action: "wait_for_reconnect",
+      message: `${params.kind} companion disconnected unexpectedly. Waiting up to ${Math.ceil(params.reconnectGraceMs / 1000)}s for ${commandName} to reconnect before stopping this transient bridge.`,
+    };
+  }
+
+  if (params.expectedClose) {
+    return {
+      action: "await_manual_reconnect",
+      message: `${params.kind} companion closed. Run "${commandName}" again in a second terminal for this directory.`,
+    };
+  }
+
+  return {
+    action: "await_manual_reconnect",
+    message: `${params.kind} companion disconnected unexpectedly. Run "${commandName}" again in a second terminal for this directory to reconnect.`,
+  };
 }
 
 export abstract class AbstractPtyAdapter implements BridgeAdapter {

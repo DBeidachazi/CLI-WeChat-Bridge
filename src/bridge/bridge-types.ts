@@ -165,7 +165,7 @@ export type BridgeEvent =
     }
   | {
       type: "shutdown_requested";
-      reason: "companion_disconnected";
+      reason: "companion_closed" | "companion_reconnect_timeout";
       message: string;
       exitCode?: number;
       timestamp: string;
