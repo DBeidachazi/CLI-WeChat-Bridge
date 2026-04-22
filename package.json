@@ -1,7 +1,7 @@
 {
   "name": "@unlinearity/cli-wechat-bridge",
   "version": "0.9.0",
-  "description": "CLI WeChat Bridge for Codex, Claude Code, OpenCode, and PowerShell over WeChat",
+  "description": "CLI WeChat Bridge for Codex, Claude Code, OpenCode, Gemini, Copilot, and PowerShell over WeChat",
   "type": "module",
   "private": true,
   "keywords": [
@@ -11,6 +11,8 @@
     "codex",
     "claude",
     "opencode",
+    "gemini",
+    "copilot",
     "terminal"
   ],
   "author": "UNLINEARITY",
@@ -33,8 +35,14 @@
     "wechat-bridge-claude": "./bin/wechat-bridge-claude.mjs",
     "wechat-bridge-shell": "./bin/wechat-bridge-shell.mjs",
     "wechat-bridge-opencode": "./bin/wechat-bridge-opencode.mjs",
+    "wechat-bridge-gemini": "./bin/wechat-bridge-gemini.mjs",
+    "wechat-bridge-copilot": "./bin/wechat-bridge-copilot.mjs",
     "wechat-opencode": "./bin/wechat-opencode.mjs",
     "wechat-opencode-start": "./bin/wechat-opencode-start.mjs",
+    "wechat-gemini": "./bin/wechat-gemini.mjs",
+    "wechat-gemini-start": "./bin/wechat-gemini-start.mjs",
+    "wechat-copilot": "./bin/wechat-copilot.mjs",
+    "wechat-copilot-start": "./bin/wechat-copilot-start.mjs",
     "wechat-check-update": "./bin/wechat-check-update.mjs"
   },
   "scripts": {
@@ -50,8 +58,14 @@
     "bridge:claude": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter claude",
     "bridge:shell": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter shell",
     "bridge:opencode": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter opencode",
+    "bridge:gemini": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter gemini",
+    "bridge:copilot": "node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter copilot",
     "opencode:panel": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter opencode",
     "opencode:start": "node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter opencode",
+    "gemini:companion": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter gemini",
+    "gemini:start": "node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter gemini",
+    "copilot:companion": "node --no-warnings --experimental-strip-types src/companion/local-companion.ts --adapter copilot",
+    "copilot:start": "node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter copilot",
     "bridge:bun": "bun src/bridge/wechat-bridge.ts",
     "test": "bun test test",
     "test:bridge": "bun test test/bridge",
@@ -60,10 +74,12 @@
     "test:watch": "bun test --watch test"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.19.1",
     "@anthropic-ai/sdk": "^0.80.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@opencode-ai/sdk": "^1.3.2",
     "ajv-formats": "^3.0.1",
+    "dotenv": "^17.4.2",
     "node-pty": "^1.1.0",
     "qrcode-terminal": "^0.12.0"
   },

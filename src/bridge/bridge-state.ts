@@ -55,6 +55,18 @@ export type BridgeRuntimeOwnership =
 const ORPHAN_LOCK_RECLAIM_TIMEOUT_MS = 2_000;
 const ORPHAN_LOCK_RECLAIM_POLL_MS = 100;
 
+export function shouldReusePersistedBridgeSession(params: {
+  currentAdapter: BridgeAdapterKind;
+  currentCwd: string;
+  persistedAdapter?: unknown;
+  persistedCwd?: unknown;
+}): boolean {
+  return (
+    params.persistedAdapter === params.currentAdapter &&
+    params.persistedCwd === params.currentCwd
+  );
+}
+
 function cloneState(state: BridgeState): BridgeState {
   return JSON.parse(JSON.stringify(state)) as BridgeState;
 }
@@ -119,6 +131,8 @@ export function normalizeBridgeLockPayload(value: unknown): BridgeLockPayload | 
     record.adapter === "codex" ||
     record.adapter === "claude" ||
     record.adapter === "opencode" ||
+    record.adapter === "gemini" ||
+    record.adapter === "copilot" ||
     record.adapter === "shell"
       ? record.adapter
       : null;
@@ -266,18 +280,33 @@ export class BridgeStateStore {
 
     const persisted = this.readStateFile();
     const persistedSharedSessionId =
-      persisted?.cwd === options.cwd
+      shouldReusePersistedBridgeSession({
+        currentAdapter: options.adapter,
+        currentCwd: options.cwd,
+        persistedAdapter: persisted?.adapter,
+        persistedCwd: persisted?.cwd,
+      })
         ? persisted.sharedSessionId ?? persisted.sharedThreadId
         : undefined;
     const persistedResumeConversationId =
       options.adapter === "claude" &&
-      persisted?.cwd === options.cwd &&
+      shouldReusePersistedBridgeSession({
+        currentAdapter: options.adapter,
+        currentCwd: options.cwd,
+        persistedAdapter: persisted?.adapter,
+        persistedCwd: persisted?.cwd,
+      }) &&
       typeof persisted.resumeConversationId === "string"
         ? persisted.resumeConversationId
         : undefined;
     const persistedTranscriptPath =
       options.adapter === "claude" &&
-      persisted?.cwd === options.cwd &&
+      shouldReusePersistedBridgeSession({
+        currentAdapter: options.adapter,
+        currentCwd: options.cwd,
+        persistedAdapter: persisted?.adapter,
+        persistedCwd: persisted?.cwd,
+      }) &&
       typeof persisted.transcriptPath === "string"
         ? persisted.transcriptPath
         : undefined;

@@ -7,6 +7,8 @@ import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_pr
 import { spawn as spawnPty } from "node-pty";
 import type { IPty } from "node-pty";
 
+import "../config/env.ts";
+
 import {
   attachLocalCompanionMessageListener,
   buildLocalCompanionToken,
@@ -51,6 +53,9 @@ import {
   nowIso,
   truncatePreview,
 } from "./bridge-utils.ts";
+import {
+  getConfiguredSpawnCommand,
+} from "../config/bridge-config.ts";
 
 export type AdapterOptions = {
   kind: BridgeAdapterKind;
@@ -249,6 +254,10 @@ export function getLocalCompanionCommandName(kind: BridgeAdapterKind): string {
       return "wechat-claude";
     case "opencode":
       return "wechat-opencode";
+    case "gemini":
+      return "wechat-gemini";
+    case "copilot":
+      return "wechat-copilot";
     default:
       return "local companion";
   }
@@ -818,7 +827,7 @@ export function resolveDefaultAdapterCommand(
 ): string {
   const platform = options.platform ?? process.platform;
   if (kind !== "shell") {
-    return kind;
+    return getConfiguredSpawnCommand(kind);
   }
 
   if (platform === "win32") {
@@ -847,7 +856,13 @@ export function buildCliEnvironment(
   const sourceEnv = options.env ?? (process.env as Record<string, string | undefined>);
   const platform = options.platform ?? process.platform;
 
-  if (kind === "codex" || kind === "claude" || kind === "opencode") {
+  if (
+    kind === "codex" ||
+    kind === "claude" ||
+    kind === "opencode" ||
+    kind === "gemini" ||
+    kind === "copilot"
+  ) {
     if (platform !== "win32") {
       return applyLoopbackNoProxy({
         ...copyDefinedEnv(sourceEnv),
@@ -921,7 +936,7 @@ export function buildPtySpawnOptions(params: {
   };
 
   if ((params.platform ?? process.platform) === "win32") {
-    options.useConpty = true;
+    (options as typeof options & { useConpty?: boolean }).useConpty = true;
   }
 
   return options;
@@ -1487,17 +1502,26 @@ export function resolveSpawnTarget(
   kind: BridgeAdapterKind,
   options: ResolveSpawnTargetOptions = {},
 ): SpawnTarget {
+  const parsedCommand = splitCommandLine(command);
   const trimmed = command.trim();
   const platform = options.platform ?? process.platform;
   const env = options.env ?? (process.env as Record<string, string | undefined>);
-  const forwardArgs = options.forwardArgs ?? [];
+  const forwardArgs = [...(parsedCommand.slice(1) ?? []), ...(options.forwardArgs ?? [])];
 
   if (!trimmed) {
     return { file: trimmed, args: [...forwardArgs] };
   }
 
-  const resolved = resolveCommandPath(trimmed, platform, env) ?? trimmed;
-  if (platform !== "win32" || (kind !== "codex" && kind !== "claude" && kind !== "opencode")) {
+  const executable = parsedCommand[0] ?? trimmed;
+  const resolved = resolveCommandPath(executable, platform, env) ?? executable;
+  if (
+    platform !== "win32" ||
+    (kind !== "codex" &&
+      kind !== "claude" &&
+      kind !== "opencode" &&
+      kind !== "gemini" &&
+      kind !== "copilot")
+  ) {
     return { file: resolved, args: [...forwardArgs] };
   }
 
@@ -1525,4 +1549,58 @@ export function resolveSpawnTarget(
   }
 
   return { file: resolved, args: [...forwardArgs] };
+}
+
+export function splitCommandLine(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const character of command) {
+    if (escaping) {
+      current += character;
+      escaping = false;
+      continue;
+    }
+
+    if (character === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        current += character;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (/\s/u.test(character)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (escaping) {
+    current += "\\";
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  return tokens;
 }

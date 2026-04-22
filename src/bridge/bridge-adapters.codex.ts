@@ -16,6 +16,10 @@ import {
 } from "./bridge-utils.ts";
 import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
 import * as shared from "./bridge-adapters.shared.ts";
+import {
+  getConfiguredCodexApprovalPolicy,
+  getConfiguredCodexSandboxMode,
+} from "../config/bridge-config.ts";
 
 type AdapterOptions = shared.AdapterOptions;
 type CodexActiveTurn = shared.CodexActiveTurn;
@@ -23,6 +27,7 @@ type CodexPendingApprovalRequest = shared.CodexPendingApprovalRequest;
 type CodexQueuedNotification = shared.CodexQueuedNotification;
 type CodexRpcPendingRequest = shared.CodexRpcPendingRequest;
 type CodexRpcRequestId = shared.CodexRpcRequestId;
+type SpawnTarget = shared.SpawnTarget;
 type CodexThreadAnnouncementSignal =
   | "status_changed"
   | "thread_started"
@@ -81,6 +86,8 @@ const {
 } = shared;
 
 const CODEX_LOCAL_THREAD_ANNOUNCE_SETTLE_MS = 150;
+const CODEX_APPROVAL_POLICY = getConfiguredCodexApprovalPolicy();
+const CODEX_SANDBOX_MODE = getConfiguredCodexSandboxMode();
 
 export class CodexPtyAdapter extends AbstractPtyAdapter {
   private appServer: ChildProcessWithoutNullStreams | null = null;
@@ -882,7 +889,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       const response = await this.sendRpcRequest("turn/start", {
         threadId,
         cwd: this.options.cwd,
-        approvalPolicy: "on-request",
+        approvalPolicy: CODEX_APPROVAL_POLICY,
         approvalsReviewer: "user",
         input: [
           {
@@ -912,7 +919,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.pendingTurnThreadId = null;
       this.interruptPendingTurnStart = false;
       this.state.activeTurnOrigin = undefined;
-      if (!this.activeTurn && this.state.status === "busy") {
+      if (!this.activeTurn) {
         this.setStatus("idle");
       }
       throw error;
@@ -1299,9 +1306,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     const response = await this.sendRpcRequest("thread/start", {
       cwd: this.options.cwd,
-      approvalPolicy: "on-request",
+      approvalPolicy: CODEX_APPROVAL_POLICY,
       approvalsReviewer: "user",
-      sandbox: "workspace-write",
+      sandbox: CODEX_SANDBOX_MODE,
       serviceName: "wechat-bridge",
       experimentalRawEvents: false,
       persistExtendedHistory: true,
@@ -1343,9 +1350,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     const response = await this.sendRpcRequest("thread/resume", {
       threadId: trimmedThreadId,
       cwd: this.options.cwd,
-      approvalPolicy: "on-request",
+      approvalPolicy: CODEX_APPROVAL_POLICY,
       approvalsReviewer: "user",
-      sandbox: "workspace-write",
+      sandbox: CODEX_SANDBOX_MODE,
     });
 
     const resumedThreadId = this.extractThreadIdFromResponse(response);
@@ -2341,7 +2348,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return null;
     }
 
-    return deltaFallback[deltaFallback.length - 1];
+    return deltaFallback[deltaFallback.length - 1] ?? null;
   }
 
   private recordTurnActivity(turnId: string, timestamp: string | number = Date.now()): void {
@@ -2600,4 +2607,3 @@ export function shouldSuppressCodexTransportFatalError(params: {
     params.cleanPanelExitInProgress
   );
 }
-

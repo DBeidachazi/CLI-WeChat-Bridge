@@ -59,6 +59,30 @@ describe("local-companion-start helpers", () => {
     ]);
   });
 
+  test("buildBackgroundBridgeArgs can keep a tmux-backed bridge persistent", () => {
+    const args = buildBackgroundBridgeArgs(
+      "/tmp/wechat-bridge.ts",
+      {
+        adapter: "gemini",
+        cwd: path.resolve("./tmp/project"),
+        timeoutMs: 15000,
+      },
+      "persistent",
+    );
+
+    expect(args).toEqual([
+      "--no-warnings",
+      "--experimental-strip-types",
+      "/tmp/wechat-bridge.ts",
+      "--adapter",
+      "gemini",
+      "--cwd",
+      path.resolve("./tmp/project"),
+      "--lifecycle",
+      "persistent",
+    ]);
+  });
+
   test("buildBackgroundBridgeArgs can launch claude in the background", () => {
     const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
       adapter: "claude",

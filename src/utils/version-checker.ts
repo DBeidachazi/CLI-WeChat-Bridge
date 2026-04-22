@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { CHANNEL_DATA_DIR, ensureChannelDataDir } from "../wechat/channel-config.ts";
+import { getConfiguredUpdateCheckHour } from "../config/bridge-config.ts";
 
 const UPDATE_CHECK_FILE = path.join(CHANNEL_DATA_DIR, "update-check.json");
-const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24小时
 
 export interface UpdateCheckCache {
   lastCheck: string;
@@ -15,6 +15,18 @@ export interface VersionInfo {
   current: string;
   latest: string;
   hasUpdate: boolean;
+}
+
+export function getLatestScheduledCheckTime(
+  now: Date,
+  scheduleHour = getConfiguredUpdateCheckHour(),
+): Date {
+  const scheduled = new Date(now);
+  scheduled.setHours(scheduleHour, 0, 0, 0);
+  if (now.getTime() < scheduled.getTime()) {
+    scheduled.setDate(scheduled.getDate() - 1);
+  }
+  return scheduled;
 }
 
 /**
@@ -54,7 +66,7 @@ export async function fetchLatestVersion(): Promise<string | null> {
 
     // 按版本号排序，返回最新的
     versionTags.sort((a, b) => compareVersions(b, a));
-    return versionTags[0];
+    return versionTags[0] ?? null;
   } catch (error) {
     // 如果 git 命令失败，静默返回 null
     return null;
@@ -142,14 +154,9 @@ export async function checkForUpdate(
     const cache = readUpdateCache();
     if (cache) {
       const lastCheckTime = new Date(cache.lastCheck).getTime();
-      const now = Date.now();
-
-      // 如果缓存未过期（24小时内），且已经通知过最新版本
-      if (now - lastCheckTime < CACHE_DURATION_MS) {
-        // 如果缓存的版本与当前版本一致，说明已经通知过
-        if (cache.lastNotifiedVersion === currentVersion) {
-          return null;
-        }
+      const currentWindowStart = getLatestScheduledCheckTime(new Date()).getTime();
+      if (Number.isFinite(lastCheckTime) && lastCheckTime >= currentWindowStart) {
+        return null;
       }
     }
   }

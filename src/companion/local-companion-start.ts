@@ -3,12 +3,13 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
   BRIDGE_LOG_FILE,
   CREDENTIALS_FILE,
+  buildWorkspaceKey,
   migrateLegacyChannelFiles,
 } from "../wechat/channel-config.ts";
 import {
@@ -21,7 +22,11 @@ import {
   readLocalCompanionEndpoint,
   type LocalCompanionEndpoint,
 } from "./local-companion-link.ts";
-import type { BridgeAdapterKind } from "../bridge/bridge-types.ts";
+import type { BridgeAdapterKind, BridgeLifecycleMode } from "../bridge/bridge-types.ts";
+import {
+  getConfiguredTmuxSessionPrefix,
+  shouldMirrorBackgroundBridgeLogsToContainer,
+} from "../config/bridge-config.ts";
 
 type LocalCompanionLaunchAdapter = Exclude<BridgeAdapterKind, "shell">;
 
@@ -39,6 +44,11 @@ type EndpointReadResult = {
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_ADAPTER: LocalCompanionLaunchAdapter = "codex";
+const SKILL_LINK_TARGETS = [
+  ".codex/skills",
+  ".gemini/skills",
+  ".copilot/skills",
+] as const;
 
 function log(adapter: LocalCompanionLaunchAdapter, message: string): void {
   process.stderr.write(`[wechat-${adapter}-start] ${message}\n`);
@@ -69,10 +79,12 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
           "Usage: wechat-codex-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "       wechat-claude-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "       wechat-opencode-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
-          "       local-companion-start [--adapter <codex|claude|opencode>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
+          "       wechat-gemini-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
+          "       wechat-copilot-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
+          "       local-companion-start [--adapter <codex|claude|opencode|gemini|copilot>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "",
-          "Starts or reuses a Codex, Claude, or OpenCode bridge for the current directory, waits for the local endpoint, then opens the visible companion or panel.",
-          "All adapters are companion-bound: closing the companion/panel also stops the bridge.",
+          "Starts or reuses a Codex, Claude, OpenCode, Gemini, or Copilot bridge for the current directory, waits for the local endpoint, then opens the visible companion or panel.",
+          "tmux-backed launches keep the bridge persistent until another start command replaces it; direct foreground launches stay companion-bound.",
           "",
         ].join("\n"),
       );
@@ -80,7 +92,7 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
     }
 
     if (arg === "--adapter") {
-      if (!next || !["codex", "claude", "opencode"].includes(next)) {
+      if (!next || !["codex", "claude", "opencode", "gemini", "copilot"].includes(next)) {
         throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
       }
       adapter = next as LocalCompanionLaunchAdapter;
@@ -224,8 +236,8 @@ async function readUsableEndpoint(
 export function buildBackgroundBridgeArgs(
   entryPath: string,
   options: LocalCompanionStartCliOptions,
+  lifecycle: BridgeLifecycleMode = "companion_bound",
 ): string[] {
-  const lifecycle = "companion_bound";
   const args = [
     "--no-warnings",
     "--experimental-strip-types",
@@ -266,19 +278,182 @@ export function buildForegroundClientArgs(
   ];
 }
 
-function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
-  const entryPath = path.resolve(MODULE_DIR, "..", "bridge", "wechat-bridge.ts");
-  const args = buildBackgroundBridgeArgs(entryPath, options);
+function quotePosixArg(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
-  const child = spawn(process.execPath, args, {
-    cwd: options.cwd,
-    env: process.env,
-    detached: true,
-    stdio: "ignore",
+function buildForegroundClientCommandLine(
+  options: LocalCompanionStartCliOptions,
+): string {
+  const entryPath = resolveForegroundClientEntryPath(options.adapter);
+  const args = buildForegroundClientArgs(entryPath, options);
+  return [process.execPath, ...args].map(quotePosixArg).join(" ");
+}
+
+export function buildTmuxSessionName(
+  options: LocalCompanionStartCliOptions,
+): string {
+  return `${getConfiguredTmuxSessionPrefix()}-${options.adapter}-${buildWorkspaceKey(options.cwd)}`;
+}
+
+function isTmuxAvailable(): boolean {
+  return (
+    spawnSync("tmux", ["-V"], {
+      stdio: "ignore",
+      windowsHide: true,
+    }).status === 0
+  );
+}
+
+function tmuxCommand(args: string[], options: { stdio?: "ignore" | "inherit" } = {}): number {
+  const result = spawnSync("tmux", args, {
+    cwd: process.cwd(),
+    stdio: options.stdio ?? "ignore",
     windowsHide: true,
   });
 
-  child.unref();
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.status ?? 1;
+}
+
+function doesTmuxSessionExist(sessionName: string): boolean {
+  return tmuxCommand(["has-session", "-t", sessionName]) === 0;
+}
+
+function ensureSkillSyncLinks(cwd: string, adapter: LocalCompanionLaunchAdapter): void {
+  const sharedSkillsDir = path.join(cwd, ".linkai", "skills");
+  fs.mkdirSync(sharedSkillsDir, { recursive: true });
+
+  for (const relativeTarget of SKILL_LINK_TARGETS) {
+    const linkPath = path.join(cwd, relativeTarget);
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+
+    try {
+      const stat = fs.lstatSync(linkPath);
+      if (stat.isSymbolicLink()) {
+        const target = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
+        if (target === sharedSkillsDir) {
+          continue;
+        }
+      } else if (stat.isDirectory()) {
+        log(
+          adapter,
+          `Skipping skills link for ${relativeTarget} because a real directory already exists.`,
+        );
+        continue;
+      } else {
+        log(
+          adapter,
+          `Skipping skills link for ${relativeTarget} because a non-directory path already exists.`,
+        );
+        continue;
+      }
+    } catch {
+      // Path does not exist; create the link below.
+    }
+
+    try {
+      fs.rmSync(linkPath, { recursive: true, force: true });
+    } catch {
+      // Best effort cleanup.
+    }
+    fs.symlinkSync(path.relative(path.dirname(linkPath), sharedSkillsDir), linkPath, "dir");
+  }
+}
+
+function ensureTmuxSession(
+  options: LocalCompanionStartCliOptions,
+): { sessionName: string; created: boolean } {
+  const sessionName = buildTmuxSessionName(options);
+  if (doesTmuxSessionExist(sessionName)) {
+    return { sessionName, created: false };
+  }
+
+  ensureSkillSyncLinks(options.cwd, options.adapter);
+  const commandLine = buildForegroundClientCommandLine(options);
+  const status = tmuxCommand([
+    "new-session",
+    "-d",
+    "-s",
+    sessionName,
+    "-c",
+    options.cwd,
+    commandLine,
+  ]);
+  if (status !== 0) {
+    throw new Error(`Failed to create tmux session ${sessionName}.`);
+  }
+
+  return { sessionName, created: true };
+}
+
+async function runVisibleClientDirect(options: LocalCompanionStartCliOptions): Promise<number> {
+  const entryPath = resolveForegroundClientEntryPath(options.adapter);
+  const args = buildForegroundClientArgs(entryPath, options);
+
+  return await new Promise<number>((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: options.cwd,
+      env: process.env,
+      stdio: "inherit",
+    });
+
+    child.once("error", (error) => reject(error));
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      resolve(code ?? 0);
+    });
+  });
+}
+
+function resolveStartBridgeLifecycle(): BridgeLifecycleMode {
+  return isTmuxAvailable() ? "persistent" : "companion_bound";
+}
+
+function openContainerLogMirrorFds(): [number, number] | null {
+  if (!shouldMirrorBackgroundBridgeLogsToContainer()) {
+    return null;
+  }
+
+  try {
+    return [fs.openSync("/proc/1/fd/1", "w"), fs.openSync("/proc/1/fd/2", "w")];
+  } catch {
+    return null;
+  }
+}
+
+function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
+  const entryPath = path.resolve(MODULE_DIR, "..", "bridge", "wechat-bridge.ts");
+  const args = buildBackgroundBridgeArgs(entryPath, options, resolveStartBridgeLifecycle());
+  const mirroredFds = openContainerLogMirrorFds();
+
+  try {
+    const child = spawn(process.execPath, args, {
+      cwd: options.cwd,
+      env: process.env,
+      detached: true,
+      stdio: mirroredFds ? ["ignore", mirroredFds[0], mirroredFds[1]] : "ignore",
+      windowsHide: true,
+    });
+
+    child.unref();
+  } finally {
+    if (mirroredFds) {
+      for (const fd of mirroredFds) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // Best effort cleanup of the parent's copies.
+        }
+      }
+    }
+  }
 }
 
 async function waitForEndpoint(
@@ -348,25 +523,29 @@ async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promis
 }
 
 async function runVisibleClient(options: LocalCompanionStartCliOptions): Promise<number> {
-  const entryPath = resolveForegroundClientEntryPath(options.adapter);
-  const args = buildForegroundClientArgs(entryPath, options);
+  if (!isTmuxAvailable()) {
+    log(options.adapter, "tmux is not available; falling back to direct foreground launch.");
+    return await runVisibleClientDirect(options);
+  }
 
-  return await new Promise<number>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.cwd,
-      env: process.env,
-      stdio: "inherit",
-    });
+  const { sessionName, created } = ensureTmuxSession(options);
+  log(
+    options.adapter,
+    created
+      ? `Created tmux session ${sessionName} for ${options.cwd}.`
+      : `Reusing tmux session ${sessionName} for ${options.cwd}.`,
+  );
 
-    child.once("error", (error) => reject(error));
-    child.once("exit", (code, signal) => {
-      if (signal) {
-        process.kill(process.pid, signal);
-        return;
-      }
-      resolve(code ?? 0);
-    });
-  });
+  if (!process.stdout.isTTY) {
+    log(options.adapter, `Attach with: tmux attach-session -t ${sessionName}`);
+    return 0;
+  }
+
+  const tmuxArgs = process.env.TMUX
+    ? ["switch-client", "-t", sessionName]
+    : ["attach-session", "-t", sessionName];
+  const status = tmuxCommand(tmuxArgs, { stdio: "inherit" });
+  return status === 0 ? 0 : status;
 }
 
 async function main(): Promise<void> {

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   evaluateBridgeRuntimeOwnership,
   normalizeBridgeLockPayload,
+  shouldReusePersistedBridgeSession,
   shouldAutoReclaimBridgeLock,
 } from "../../src/bridge/bridge-state.ts";
 
@@ -117,6 +118,35 @@ describe("bridge-state lock helpers", () => {
         },
         (pid) => pid === 123 || pid === 456,
       ),
+    ).toBe(false);
+  });
+
+  test("shouldReusePersistedBridgeSession only keeps session ids within the same adapter and cwd", () => {
+    expect(
+      shouldReusePersistedBridgeSession({
+        currentAdapter: "gemini",
+        currentCwd: "/app",
+        persistedAdapter: "gemini",
+        persistedCwd: "/app",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldReusePersistedBridgeSession({
+        currentAdapter: "gemini",
+        currentCwd: "/app",
+        persistedAdapter: "codex",
+        persistedCwd: "/app",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldReusePersistedBridgeSession({
+        currentAdapter: "gemini",
+        currentCwd: "/app",
+        persistedAdapter: "gemini",
+        persistedCwd: "/other",
+      }),
     ).toBe(false);
   });
 

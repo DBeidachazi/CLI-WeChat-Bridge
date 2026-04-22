@@ -814,6 +814,22 @@ export function formatSessionSwitchMessage(params: {
     }
   }
 
+  if (params.adapter === "gemini" || params.adapter === "copilot") {
+    const label = params.adapter === "gemini" ? "Gemini" : "Copilot";
+    switch (params.reason) {
+      case "local_follow":
+      case "local_session_fallback":
+      case "local_turn":
+        return `${label} session switched to ${shortSessionId} from the local terminal.`;
+      case "wechat_resume":
+        return `${label} session switched to ${shortSessionId} from WeChat.`;
+      case "startup_restore":
+        return `${label} restored shared session ${shortSessionId} on startup.`;
+      default:
+        return `${label} session switched to ${shortSessionId}.`;
+    }
+  }
+
   switch (params.reason) {
     case "local_follow":
     case "local_session_fallback":
@@ -894,6 +910,10 @@ export function formatMirroredUserInputMessage(
         ? "Local Claude input"
         : adapter === "opencode"
           ? "Local OpenCode input"
+          : adapter === "gemini"
+            ? "Local Gemini input"
+            : adapter === "copilot"
+              ? "Local Copilot input"
           : "Local input";
   return `${label}:\n${truncatePreview(text, 500)}`;
 }
@@ -902,12 +922,16 @@ export function formatFinalReplyMessage(
   adapter: BridgeAdapterKind,
   text: string,
 ): string {
-  if (adapter === "claude" || adapter === "codex" || adapter === "opencode") {
+  if (
+    adapter === "claude" ||
+    adapter === "codex" ||
+    adapter === "opencode" ||
+    adapter === "gemini" ||
+    adapter === "copilot"
+  ) {
     return text;
   }
-  // After the early return above, only "shell" remains.
-  const label = (adapter as string) === "codex" ? "Codex" : (adapter as string) === "claude" ? "Claude" : (adapter as string) === "opencode" ? "OpenCode" : adapter;
-  return `${label} final reply:\n${text}`;
+  return `Shell final reply:\n${text}`;
 }
 
 const OPENCODE_WORKING_NOTICE_RE = /^OpenCode is still working on:\s*$/i;
@@ -1125,7 +1149,18 @@ export function formatTaskFailedMessage(
   adapter: BridgeAdapterKind,
   text: string,
 ): string {
-  const label = adapter === "codex" ? "Codex" : adapter === "claude" ? "Claude" : adapter === "opencode" ? "OpenCode" : adapter;
+  const label =
+    adapter === "codex"
+      ? "Codex"
+      : adapter === "claude"
+        ? "Claude"
+        : adapter === "opencode"
+          ? "OpenCode"
+          : adapter === "gemini"
+            ? "Gemini"
+            : adapter === "copilot"
+              ? "Copilot"
+              : adapter;
   return `${label} task failed:\n${text}`;
 }
 

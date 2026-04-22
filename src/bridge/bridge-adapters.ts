@@ -1,4 +1,5 @@
 import type { BridgeAdapter } from "./bridge-types.ts";
+import { AcpCliAdapter } from "./bridge-adapters.acp.ts";
 import { ClaudeCompanionAdapter } from "./bridge-adapters.claude.ts";
 import { LocalCompanionProxyAdapter } from "./bridge-adapters.core.ts";
 import { CodexPtyAdapter } from "./bridge-adapters.codex.ts";
@@ -21,6 +22,18 @@ export function createBridgeAdapter(options: AdapterOptions): BridgeAdapter {
     case "opencode":
       return options.renderMode === "companion"
         ? new OpenCodeServerAdapter(options)
+        : new LocalCompanionProxyAdapter(options);
+    case "gemini":
+    case "copilot":
+      return options.renderMode === "companion"
+        ? new AcpCliAdapter({
+            kind: options.kind,
+            command: options.command,
+            cwd: options.cwd,
+            profile: options.profile,
+            initialSharedSessionId:
+              options.initialSharedSessionId ?? options.initialSharedThreadId,
+          })
         : new LocalCompanionProxyAdapter(options);
     case "shell":
       return new ShellAdapter(options);

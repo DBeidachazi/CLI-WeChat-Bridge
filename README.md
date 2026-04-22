@@ -1,500 +1,347 @@
-# CLI WeChat Bridge 
+# CLI WeChat Bridge
 
-**命令行工具的微信桥接**：本项目用于桥接微信消息与本地运行的 [`Codex`](https://github.com/openai/codex)、[`Claude Code`](https://code.claude.com/docs/en/overview) 或持久化 `powershell.exe` 会话，并将本地输出、审批请求与运行状态同步回微信。
+把微信消息桥接到本地 CLI，会话权威仍然留在你自己的终端里。
 
-当前实现以本地工作流为中心展开，重点是保留本地原生终端体验，并在此基础上提供微信侧的远程输入、结果回流与状态同步能力。
+当前仓库支持这些适配器：
 
-## 这个项目解决什么问题
+- `codex`
+- `gemini`
+- `copilot`
+- `claude`
+- `opencode`
+- `shell`
 
-本项目面向这样一类使用场景：
+项目的核心目标不是把微信变成新的主界面，而是让你离开电脑时，仍然能通过微信向本地 CLI 发消息、接收回复、处理审批，并在需要时回到本地继续原生终端工作流。
 
-- 你的主工作流仍在本地终端中进行
-- 你希望继续使用原生 `codex` 或其他 CLI 工具，而不是迁移到网页或托管机器人
-- 你希望在离开电脑时，仍能通过微信向本地会话发送请求，并接收必要的输出、与状态同步
+## 当前推荐用法
 
-当前项目并不试图把微信变成新的主工作界面。相反，它的定位是：
+推荐直接用 Docker Compose 跑这个项目。
 
-- 本地 CLI 仍然是主工作界面
-- 微信是远程入口，允许远程接入
-- 会话一致性、线程状态和审批流仍以**本地会话为中心**
+现在容器启动链路已经做了这些事情：
 
-## 快速开始
+- 自动安装/更新 `codex`、`gemini`、`copilot`、`claude`、`opencode`
+- 自动检查并修复本项目可执行文件的 `+x`
+- 缺少微信凭据时自动执行 `bun run setup`
+- 把微信登录二维码直接打印到 `docker logs`
+- 把微信和 CLI 的往返文本转录打印到 `docker logs`
+- `wechat-gemini-start` / `wechat-copilot-start` 这类替换 bridge 的后台日志同样会进入 `docker logs`
+- 容器内部安装 `tmux`
+- 允许你在容器里直接执行 `wechat-codex-start`、`wechat-gemini-start` 之类的命令切换当前活动适配器
 
-### 环境要求
+## 重要行为
 
-- Windows 为当前主要验证环境
-- [Node.js](https://nodejs.org/en/download) `>= 24.0.0`（建议直接安装官网 LTS 版本）
-- [Bun](https://bun.sh/docs/installation) `>= 1.0.0`
-- 已安装以下至少一种本地 CLI：（最好更新至最新版本）
-  - [Codex](https://github.com/openai/codex) 
-  - [Claude Code](https://code.claude.com/docs/en/overview)
-  - powershell.exe
+这几个行为是当前实现里最需要先知道的：
 
+1. 一个容器内同一时刻只有一个活动 bridge。
+2. `wechat-codex-start`、`wechat-gemini-start`、`wechat-copilot-start` 这类命令会复用当前工作区 bridge，或者替换掉旧 bridge。
+3. 如果你正在用 `codex`，再运行 `wechat-gemini-start`，当前 bridge 会被切换到 `gemini`。
+4. Docker 模式下容器主进程是 manager，不再是单个 bridge 本体，所以切换适配器不会再把整个容器一起杀掉。
+5. `tmux` session 只有在第一次运行 `wechat-*-start` 时才会创建；刚进容器时 `tmux ls` 为空是正常的。
+6. `tmux` 模式下，`wechat-*-start` 后台 bridge 现在按 `persistent` 启动，不会因为 launcher 进程退出就被误回收。
 
-### 1. 克隆仓库并安装依赖
+## Docker Compose 快速开始
+
+### 1. 启动容器
 
 ```bash
 git clone https://github.com/UNLINEARITY/CLI-WeChat-Bridge
 cd CLI-WeChat-Bridge
+docker compose up --build -d
+```
+
+### 2. 扫微信二维码
+
+```bash
+docker compose logs -f cli-wechat-bridge
+```
+
+如果容器里还没有微信凭据，启动时会自动执行 `bun run setup`，二维码会直接出现在日志里。扫码并在手机里确认即可。
+
+默认凭据路径：
+
+```text
+/root/.claude/channels/wechat/account.json
+```
+
+宿主机对应挂载目录：
+
+```text
+./home/.claude/channels/wechat/account.json
+```
+
+### 3. 进入容器，手动登录各家 CLI
+
+```bash
+docker compose exec cli-wechat-bridge bash
+```
+
+然后按你的需要手动登录：
+
+```bash
+codex
+gemini
+copilot
+claude
+opencode
+```
+
+项目不会替你自动登录这些 provider 账号；推荐你第一次进容器后把需要的 CLI 都手动登录一遍。
+
+### 4. 启动你想要的适配器
+
+常用的是这些：
+
+```bash
+wechat-codex-start
+wechat-gemini-start
+wechat-copilot-start
+wechat-claude-start
+wechat-opencode-start
+```
+
+如果你已经在当前容器里使用 `codex`，此时再执行：
+
+```bash
+wechat-gemini-start
+```
+
+当前 bridge 会切换成 `gemini`。同理，`wechat-copilot-start`、`wechat-claude-start`、`wechat-opencode-start` 也是一样的替换逻辑。
+
+## 你会在日志里看到什么
+
+容器日志现在会包含三类关键信息：
+
+- 启动和重启信息
+- 微信二维码登录输出
+- 微信和 CLI 的文本往返转录
+
+查看日志：
+
+```bash
+docker compose logs -f cli-wechat-bridge
+```
+
+当前默认会把转录打印出来，格式大致类似：
+
+```text
+[wechat-bridge] [transcript] wechat->cli sender=xxx
+  现在帮我看一下这个错误
+
+[wechat-bridge] [transcript] cli->wechat context=message recipient=xxx
+  我已经定位到问题了，正在修复。
+```
+
+如果最终回复里触发了文件、图片、视频、语音发送，日志里也会记录发送的附件路径。
+
+## 本地仓库模式
+
+如果你不想走 Docker，也可以直接在本地仓库里运行。
+
+### 1. 安装依赖
+
+```bash
 bun install
+npm install -g .
 ```
 
-### 2. 安装全局命令
-
-如果你希望在任意目录直接使用本项目：
-
-```bash
-npm install -g . #将命令下载到全局
-```
-
-如果仓库更新，可以重新clone，而本地留有旧配置，再强制更新：
-
-```bash
-npm install -g . --force # 强制清除旧配置
-```
-
-开发阶段也可以使用：
+开发态也可以：
 
 ```bash
 npm link
 ```
 
-说明：
-
-- `npm link` 会让全局命令直接指向当前仓库源码
-- `npm install -g .` 会安装一份当前仓库的复制版本；后续代码更新后需要重新执行一次
-
-### 3. 完成微信登录
-
-> 在 clone 的仓库目录下：
-
-```bash
-bun run setup # 绑定微信 ClawBot
-```
-
-该流程会：
-
-1. 获取微信登录二维码
-2. 选择 y 确认，在终端打印二维码
-3. 等待你在微信中扫码并确认
-4. 将 bot 凭据写入本地数据目录
-
-![alt text](docs/images/image-0.png)
-
-默认凭据文件路径：
-
-```text
-~/.claude/channels/wechat/account.json
-```
-
-### 4. 启动 `codex` 模式
-
-假设你的项目目录是：
-
-```bash
-cd D:\work\your-project
-```
-> 当你下载到全局`npm install -g .`后，可以在任意的路径运行桥接！
-
-
-终端 A：（这是用于监听和服务的，先打开这个）
-
-```bash
-wechat-bridge-codex
-```
-![alt text](docs/images/image-1.png)
-
-终端 B：（再新开一个窗口,运行以下命令，近乎原生的codex，不过暂时没有实现远程请求确认，待完善)
-
-```bash
-wechat-codex
-```
-
-![alt text](docs/images/image-2.png)
-
-然后即可：（允许双向交互！windows 和 linux 均实测成功）
-
-- 在微信中发送普通文本
-- 在本地 `wechat-codex` 中继续原生交互
-- 在本地执行 `/resume` 切线程
-- 让微信自动跟随当前本地线程
-
-![Codex windows](docs/images/image-3.png)
-
-![Codex Linux](docs/images/image-4.png)
-
-如果你希望用**单命令入口**快速启动，也可以直接使用：（仅需打开一个终端）
-
-```bash
-wechat-codex-start
-```
-
-它会自动完成以下动作：
-
-1. 复用当前目录已运行的 `wechat-bridge-codex`
-2. 如果 bridge 正在服务其他目录，则停止旧 bridge 并切换到当前目录
-3. 等待当前目录对应的本地 companion endpoint 就绪
-4. 打开可见的 `wechat-codex` 会话
-
-### 5. 启动 Claude Code （不走Channels）
-
-与 Codex 类似的，
-
-终端 A：（这是用于监听和服务的，先打开这个）
-
-```bash
-wechat-bridge-claude
-```
-
-终端 B：（再新开一个窗口,运行以下命令，近乎原生的claude code，并且支持通过微信完成远程审批确认）
-
-```bash
-wechat-claude
-```
-
-也支持单命令启动：
-
-```bash
-wechat-claude-start
-```
-
-它会自动在当前目录拉起或复用 `wechat-bridge-claude`，等待 endpoint 就绪后打开可见的 `wechat-claude` companion。
-
-![Claude Windows](docs/images/image-6.png)
-
-![Claude Linux](docs/images/image-7.png)
-
-
-## 适配器支持情况
-
-> 目前支持将本地文件传输至微信
-
-![文件传输](docs/images/image-8.png)
-
-
-| 适配器 | 当前状态 | 说明 |
-| --- | --- | --- |
-| `codex` | 已接入 | 双终端模式；本地 panel 为线程权威；微信跟随本地线程 |
-| `claude` | 已接入 | 当前采用 `wechat-bridge-claude` + `wechat-claude` 的双终端 companion 模式；会话切换、最终回复与审批元数据已按 Claude session 语义同步 |
-| `shell` | 可用 | 持久 `powershell.exe` 会话；高风险命令支持审批 |
-
-
-## 命令说明
-
-### 推荐全局命令
-
-```bash
-wechat-bridge-codex # 开启 Codex 的桥接
-wechat-codex # 打开 Codex (原生交互)
-wechat-codex-start # 开启 Codex 的桥接的同时， 打开 Codex
-wechat-bridge-claude # 开启 Claude Code 的桥接
-wechat-claude # 打开 Claude Code (原生交互)
-wechat-claude-start # 开启桥接的同时， 打开  Claude Code
-wechat-bridge-shell # 终端桥接，headless 进程
-```
-
-### 仓库内开发入口
+### 2. 登录微信
 
 ```bash
 bun run setup
-bun run bridge:codex
-bun run codex:panel
+```
+
+### 3. 启动单命令入口
+
+```bash
+wechat-codex-start
+wechat-gemini-start
+wechat-copilot-start
+wechat-claude-start
+wechat-opencode-start
+```
+
+如果你更喜欢仓库内 script，对应的是：
+
+```bash
 bun run codex:start
-bun run bridge:claude
-bun run claude:companion
+bun run gemini:start
+bun run copilot:start
 bun run claude:start
+bun run opencode:start
+```
+
+## 手动桥接入口
+
+如果你想把 bridge 和 companion 分开跑，也保留了这些入口：
+
+```bash
+wechat-bridge-codex
+wechat-bridge-gemini
+wechat-bridge-copilot
+wechat-bridge-claude
+wechat-bridge-opencode
+wechat-bridge-shell
+```
+
+仓库内 script 版本：
+
+```bash
+bun run bridge:codex
+bun run bridge:gemini
+bun run bridge:copilot
+bun run bridge:claude
+bun run bridge:opencode
 bun run bridge:shell
-bun run bridge:bun -- --adapter codex
-bun run test
 ```
 
-### Bridge CLI 参数
+## Docker 相关说明
 
-适用于：
+Compose 配置当前包含这些默认行为：
 
-- `wechat-bridge-codex`
-- `wechat-bridge-claude`
-- `wechat-bridge-shell`
+- 基础镜像：`imbios/bun-node:latest-24-debian`
+- 自动安装 `tmux`
+- `restart: unless-stopped`
+- 网络：`openclaw-net`，外部网络
+- 用户：`0:0`
+- 挂载：`./home:/root`
+- `node_modules` 使用独立 volume，避免宿主机源码挂载把容器内原生模块覆盖掉
 
-示例：
+## GitHub Actions 与 DockerHub
 
-```bash
-wechat-bridge-codex --cwd D:\work\my-project
-wechat-bridge-claude --profile work
-wechat-bridge-shell --cmd pwsh.exe
-```
-
-支持参数：
-
-- `--cwd <path>`：指定工作目录
-- `--cmd <executable>`：覆盖默认命令
-- `--profile <name-or-path>`：向适配器传入 profile
-
-### `wechat-codex-start` 参数
-
-示例：
-
-```bash
-wechat-codex-start --cwd D:\work\my-project
-wechat-codex-start --profile work
-```
-
-支持参数：
-
-- `--cwd <path>`：显式指定 bridge / companion 对应的工作目录
-- `--profile <name-or-path>`：转发给后台启动的 `wechat-bridge-codex`
-- `--timeout-ms <ms>`：等待当前目录 endpoint 的最长时间，默认 `15000`
-
-### `wechat-claude-start` 参数
-
-示例：
-
-```bash
-wechat-claude-start --cwd D:\work\my-project
-wechat-claude-start --profile work
-```
-
-支持参数：
-
-- `--cwd <path>`：显式指定 bridge / companion 对应的工作目录
-- `--profile <name-or-path>`：转发给后台启动的 `wechat-bridge-claude`
-- `--timeout-ms <ms>`：等待当前目录 endpoint 的最长时间，默认 `15000`
-
-## 微信侧支持的指令
-
-| 指令 | 说明 |
-| --- | --- |
-| 普通文本 | 发送给当前活动会话 |
-| `/status` | 查看 bridge 当前状态 |
-| `/stop` | 中断当前任务 |
-| `/reset` | 重建当前本地会话 |
-
-## 工作区模型
-
-本项目采用“当前目录即当前工作区”的模型：
-
-- 从哪个目录启动 `wechat-bridge-codex`，哪个目录就是当前工作区
-- `wechat-codex` 必须连接同一工作区
-- 不同工作区的状态文件相互隔离
-
-当前不是“一个全局守护进程同时管理多个仓库”的架构，而是：
-
-- 单 owner
-- 单 bridge
-- 单活动工作区
-
-## 数据目录与状态文件
-
-默认数据目录：
+仓库现在带了一个 DockerHub 发布工作流：
 
 ```text
-~/.claude/channels/wechat
+.github/workflows/dockerhub.yml
 ```
 
-主要文件如下：
+触发方式：
 
-| 路径 | 作用 |
-| --- | --- |
-| `account.json` | 微信凭据 |
-| `sync_buf.txt` | iLink 增量同步游标 |
-| `context_tokens.json` | 微信上下文 token 缓存 |
-| `bridge.log` | bridge 运行日志 |
-| `bridge.lock.json` | bridge 运行锁 |
-| `workspaces/<workspace-key>/bridge-state.json` | 当前工作区状态 |
-| `workspaces/<workspace-key>/codex-panel-endpoint.json` | 当前工作区 panel endpoint |
+- push 到 `main`
+- push `v*` tag
+- 手动执行 `workflow_dispatch`
 
-### 环境变量
+发布前需要在 GitHub 仓库里配置这些 secrets：
 
-| 变量名 | 说明 |
-| --- | --- |
-| `WECHAT_ILINK_BASE_URL` | 覆盖默认 iLink API 地址 |
-| `CLAUDE_WECHAT_CHANNEL_DATA_DIR` | 覆盖默认数据目录 |
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
 
-## 版本更新
+可选变量：
 
-### 检查更新
+- `DOCKERHUB_IMAGE_NAME`
 
-运行以下命令检查是否有新版本：
+如果不配 `DOCKERHUB_IMAGE_NAME`，默认镜像名是：
 
-```bash
-wechat-check-update
+```text
+cli-wechat-bridge
 ```
 
-该命令会显示：
-- 当前安装的版本
-- 远程仓库的最新版本
-- 如果有更新，会提供详细的更新指引
+最终推送的镜像地址形如：
 
-### 启动时自动检查
-
-当启动 `wechat-bridge` 相关命令时（如 `wechat-bridge-codex`、`wechat-bridge-claude`），程序会自动检查更新（每24小时一次）。
-
-- 自动检查在后台异步执行，不影响启动速度
-- 检查结果会被缓存，避免频繁查询
-- 如果发现新版本，会在终端显示更新提示
-
-### 版本检查机制
-
-- **查询方式**：使用 `git ls-remote --tags origin` 查询远程仓库版本标签
-- **缓存策略**：检查结果缓存在 `~/.claude/channels/wechat/update-check.json`，有效期24小时
-- **无 API 限制**：不使用 GitHub API，避免限流问题，可以频繁使用
-
-### 获取最新版本
-
-当提示有新版本时，使用以下命令更新：
-
-```bash
-# 进入项目目录
-cd CLI-WeChat-Bridge
-
-# 拉取最新代码
-git pull
-
-# 安装依赖
-bun install
-
-# 重新安装全局命令
-npm install -g .
+```text
+docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 ```
 
-### 未来计划（还未发布）
+工作流会自动构建并推送：
 
-当项目达到 **1.0.0** 稳定版本后，将发布到 npm，届时可以使用更简便的更新方式：
+- `latest`（默认分支）
+- 分支名 tag
+- Git tag
+- 短 SHA tag
 
-```bash
-npm install -g @unlinearity/cli-wechat-bridge@latest
+## skills 同步
+
+第一次运行 `wechat-*-start` 创建 `tmux` session 时，会自动把：
+
+- `.codex/skills`
+- `.gemini/skills`
+- `.copilot/skills`
+
+链接到统一的：
+
+```text
+.linkai/skills
+```
+
+这样不同 CLI 的 skills 可以共用。
+
+## 配置
+
+项目会自动读取仓库根目录下的 `.env`。
+
+目前比较重要的几个配置项：
+
+```dotenv
+WECHAT_BRIDGE_DEFAULT_CLI_PROGRAM=codex
+WECHAT_BRIDGE_DEFAULT_MODEL=gpt-5.4-mini
+WECHAT_BRIDGE_UPDATE_CHECK_HOUR=5
+
+WECHAT_BRIDGE_CODEX_APPROVAL_POLICY=never
+WECHAT_BRIDGE_CODEX_SANDBOX=danger-full-access
+WECHAT_BRIDGE_SPAWN_CODEX=codex --model gpt-5.4-mini --dangerously-bypass-approvals-and-sandbox
+
+WECHAT_BRIDGE_SPAWN_GEMINI=gemini --acp
+WECHAT_BRIDGE_SPAWN_COPILOT=copilot --acp --stdio
+WECHAT_BRIDGE_ACP_AUTO_APPROVE=true
+
+WECHAT_BRIDGE_AUTO_INSTALL_CLIS=true
+WECHAT_BRIDGE_AUTO_WECHAT_SETUP=true
+WECHAT_BRIDGE_LOG_TRANSCRIPT=true
+WECHAT_BRIDGE_BACKGROUND_LOG_TO_CONTAINER=true
 ```
 
 ## 常见问题
 
-### 1. `wechat-codex` 提示找不到 bridge
+### `bun run wechat-codex-start` 为什么报 script not found
 
-通常原因如下：
+因为 `wechat-codex-start` 是全局命令，不是 `package.json` 里的 script。
 
-- 还没有先启动 `wechat-bridge-codex`
-- bridge 与 panel 不在同一个目录
-- 当前工作区 endpoint 文件不存在
-
-建议：
-
-1. 先在目标目录启动 `wechat-bridge-codex`
-2. 再在同一目录启动 `wechat-codex`
-
-如果你不想手动分两个终端，也可以直接执行：
+你应该运行：
 
 ```bash
 wechat-codex-start
 ```
 
-### 2. 全局命令不存在
-
-请确认已经执行以下之一：
+如果你想用 `bun run`，对应写法是：
 
 ```bash
-npm install -g .
+bun run codex:start
 ```
 
-或：
+### 为什么刚进容器时 `tmux ls` 是空的
+
+因为 `tmux` session 不是容器启动时就创建的，而是在你第一次执行 `wechat-codex-start`、`wechat-gemini-start` 这类命令时才创建。
+
+### 我能不能从 `codex` 直接切到 `gemini`
+
+可以。直接运行：
 
 ```bash
-npm link
+wechat-gemini-start
 ```
 
-如果命令仍不存在，请检查 npm 全局 bin 目录是否已加入 `PATH`。
+它会停止当前活动 bridge，并切换到 `gemini`。当前实现是单活动 bridge 设计，不会在同一个容器里并行保留多个活动适配器。
 
-### 3. Windows 下出现 `codex.ps1` 或 PowerShell profile 警告
+### 为什么容器里还要手动执行 `codex` / `gemini` / `copilot`
 
-项目已经尽量规避 `codex.ps1`：
+因为这些 provider CLI 的账号登录态属于各自工具本身，项目不会替你自动代登。推荐第一次进入容器后把你要用的 CLI 都手动登录完成。
 
-- 优先查找 vendor `codex.exe`
-- 必要时通过 `cmd.exe` 包装 `codex.cmd`
+## 测试
 
-如果本机 PowerShell profile 本身受执行策略限制，终端仍可能打印相关警告。这通常不是 bridge 本身故障。
-
-### 4. 微信上提示没有 context token
-
-通常表示当前联系人还没有建立可用的 iLink 上下文。一般先由 owner 账号发送一条普通消息即可建立上下文。
-
-### 5. `codex is still working...`
-
-该提示只应在当前确实存在活动任务时出现。
-
-如果偶发出现：
-
-1. 先确认本地 `wechat-codex` 是否真的仍在执行任务
-2. 必要时使用 `/stop`
-3. 检查：
-
-```text
-~/.claude/channels/wechat/bridge.log
-```
-
-### 6. 本地 `/resume` 后微信不同步
-
-请优先确认： `wechat-bridge-codex` 与 `wechat-codex` 是否都已重启到同一版本。
-
-部分设备可能存在第一次本地输入不同步到微信的情况，可以先微信发送指令来建立连接。
-
-## 已知限制
-
-- 微信 `/resume` 暂时被禁用（可能导致对话双向不稳定）
-- Codex 不支持底层任务的远程审批！建议给好权限，正常使用，几乎不会主动请求较为低级的远程审批；Claude Code 支持远程审批，但是测试的不够，如有问题可以提 issue。
-- 当前模型是单 owner、单 bridge、单活动工作区
-
-
-## 开发说明
-
-### 主要入口
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/bridge/wechat-bridge.ts` | bridge 主事件循环 |
-| `src/bridge/bridge-adapters.ts` | `codex` / `claude` / `shell` 适配器实现 |
-| `src/companion/local-companion.ts` | `wechat-codex` / `wechat-claude` 本地 companion 入口 |
-| `src/companion/codex-panel.ts` | Codex panel 入口（备用） |
-| `src/companion/codex-panel-link.ts` | bridge 与 Codex panel 的本地 IPC |
-| `src/wechat/wechat-transport.ts` | iLink 消息收发 |
-| `src/bridge/bridge-state.ts` | bridge 状态、锁与日志 |
-| `src/wechat/setup.ts` | 登录与凭据初始化 |
-
-### 测试
+常用测试命令：
 
 ```bash
-bun test
+bun test test/companion/local-companion-start.test.ts
+bun test test/bridge/wechat-bridge.test.ts
+git diff --check
+docker compose config
 ```
-
-当前测试主要覆盖：
-
-- Windows 启动解析
-- Codex 线程跟随
-- session log fallback
-- panel / busy / completion recovery
-- 工作区路径与状态隔离
 
 ## 致谢
 
-### 相关链接
-- [Linux DO](https://linux.do/)：学AI，上L站！
-
-- [openclaw-weixin](https://github.com/hao-ji-xing/openclaw-weixin)：支持Claude Code Channel,感谢如此迅速的开源。
-
-- [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)：TypeScript 版 MCP SDK
-
-- [node-pty](https://github.com/microsoft/node-pty)：本地 PTY / ConPTY 进程桥接
-
-- [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript)：Anthropic TypeScript SDK
-
-- [qrcode-terminal](https://github.com/gtanner/qrcode-terminal)：终端二维码输出
-
-
-### 感谢支持
-
-> 感谢 issue 反馈者 和 pr 贡献者。
-
-创作不易，如感觉对您有帮助、觉得有意思，可以请喝杯奶茶。❤️
-
-<p align='center'><img src='docs\images\wechat-tip.png' width=60%></p> 
-
-## License
-
-[MIT](LICENSE.txt)
+项目在微信协议和 channel 方向上参考了 `openclaw-weixin` 的一些思路，也在此基础上继续朝“保留本地原生 CLI 工作流”的方向做了分化实现。

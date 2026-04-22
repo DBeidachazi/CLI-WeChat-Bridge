@@ -12,6 +12,7 @@ import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 import { BridgeStateStore } from "./bridge-state.ts";
 import { reapOrphanedOpencodeProcesses, reapPeerBridgeProcesses } from "./bridge-process-reaper.ts";
 import { clearLocalCompanionEndpoint } from "../companion/local-companion-link.ts";
+import { shouldLogBridgeTranscript } from "../config/bridge-config.ts";
 import type {
   ApprovalRequest,
   BridgeAdapter,
@@ -33,6 +34,7 @@ import {
   formatStatusReport,
   formatTaskFailedMessage,
   MESSAGE_START_GRACE_MS,
+  normalizeOutput,
   nowIso,
   OutputBatcher,
   parseWechatControlCommand,
@@ -88,6 +90,60 @@ function log(message: string): void {
 
 function logError(message: string): void {
   process.stderr.write(`[wechat-bridge] ERROR: ${message}\n`);
+}
+
+export function formatBridgeTranscriptLogEntry(params: {
+  direction: "wechat->cli" | "cli->wechat";
+  label: string;
+  text: string;
+}): string {
+  const normalized = normalizeOutput(params.text).trimEnd();
+  const header = `[transcript] ${params.direction} ${params.label}`.trim();
+  if (!normalized.trim()) {
+    return `${header}\n  (empty)`;
+  }
+
+  const body = normalized
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+  return `${header}\n${body}`;
+}
+
+export function formatBridgeAttachmentLogEntry(params: {
+  recipientId: string;
+  kind: "image" | "file" | "voice" | "video";
+  filePath: string;
+}): string {
+  return `[transcript] cli->wechat attachment recipient=${params.recipientId} kind=${params.kind} path=${params.filePath}`;
+}
+
+function logBridgeTranscript(direction: "wechat->cli" | "cli->wechat", label: string, text: string): void {
+  if (!shouldLogBridgeTranscript()) {
+    return;
+  }
+
+  log(
+    formatBridgeTranscriptLogEntry({
+      direction,
+      label,
+      text,
+    }),
+  );
+}
+
+function logBridgeAttachment(recipientId: string, kind: "image" | "file" | "voice" | "video", filePath: string): void {
+  if (!shouldLogBridgeTranscript()) {
+    return;
+  }
+
+  log(
+    formatBridgeAttachmentLogEntry({
+      recipientId,
+      kind,
+      filePath,
+    }),
+  );
 }
 
 function computePollRetryDelayMs(consecutiveFailures: number): number {
@@ -252,7 +308,10 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
 
     switch (arg) {
       case "--adapter":
-        if (!next || !["codex", "claude", "opencode", "shell"].includes(next)) {
+        if (
+          !next ||
+          !["codex", "claude", "opencode", "gemini", "copilot", "shell"].includes(next)
+        ) {
           throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
         }
         adapter = next as BridgeAdapterKind;
@@ -299,7 +358,7 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
   }
 
   if (!adapter) {
-    throw new Error("Missing required --adapter <codex|claude|opencode|shell>");
+    throw new Error("Missing required --adapter <codex|claude|opencode|gemini|copilot|shell>");
   }
 
   const defaultCommand = resolveDefaultAdapterCommand(adapter);
@@ -315,12 +374,14 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
 function printUsageAndExit(): never {
   process.stdout.write(
     [
-      "Usage: wechat-bridge --adapter <codex|claude|opencode|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
+      "Usage: wechat-bridge --adapter <codex|claude|opencode|gemini|copilot|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
       "",
       "Examples:",
       "  wechat-bridge-codex",
       "  wechat-bridge-claude --cwd ~/work/my-project",
       "  wechat-bridge-opencode --cwd ~/work/my-project",
+      "  wechat-bridge-gemini --cwd ~/work/my-project",
+      "  wechat-bridge-copilot --cwd ~/work/my-project",
       "  wechat-bridge-shell --cmd pwsh   # headless shell executor for non-interactive commands/scripts",
       "  wechat-bridge-shell --cmd bash   # headless shell executor for non-interactive commands/scripts",
       "  wechat-bridge-codex --lifecycle companion_bound",
@@ -454,7 +515,10 @@ async function main(): Promise<void> {
     text: string,
     context: WechatSendContext = "message",
   ) => {
-    return queueWechatTextAction(() => transport.sendText(senderId, text)).catch((err) => {
+    return queueWechatTextAction(async () => {
+      logBridgeTranscript("cli->wechat", `context=${context} recipient=${senderId}`, text);
+      await transport.sendText(senderId, text);
+    }).catch((err) => {
       logError(`Failed to send WeChat ${context}: ${describeWechatTransportError(err)}`);
       stateStore.appendLog(
         formatWechatSendFailureLogEntry({
@@ -676,6 +740,14 @@ async function main(): Promise<void> {
     if (options.adapter === "codex") {
       log(
         'Start the visible Codex panel in a second terminal with: wechat-codex',
+      );
+    } else if (options.adapter === "gemini") {
+      log(
+        'Start the visible Gemini companion in a second terminal with: wechat-gemini',
+      );
+    } else if (options.adapter === "copilot") {
+      log(
+        'Start the visible Copilot companion in a second terminal with: wechat-copilot',
       );
     } else if (options.adapter === "opencode") {
       log(
@@ -913,21 +985,25 @@ function wireAdapterEvents(params: {
             sender: {
               sendText: (text) => queueWechatMessage(authorizedUserId, text),
               sendImage: (imagePath) =>
-                queueWechatAttachmentAction(() =>
-                  transport.sendImage(imagePath, { recipientId: authorizedUserId }),
-                ),
+                queueWechatAttachmentAction(async () => {
+                  logBridgeAttachment(authorizedUserId, "image", imagePath);
+                  return await transport.sendImage(imagePath, { recipientId: authorizedUserId });
+                }),
               sendFile: (filePath) =>
-                queueWechatAttachmentAction(() =>
-                  transport.sendFile(filePath, { recipientId: authorizedUserId }),
-                ),
+                queueWechatAttachmentAction(async () => {
+                  logBridgeAttachment(authorizedUserId, "file", filePath);
+                  return await transport.sendFile(filePath, { recipientId: authorizedUserId });
+                }),
               sendVoice: (voicePath) =>
-                queueWechatAttachmentAction(() =>
-                  transport.sendVoice(voicePath, authorizedUserId),
-                ),
+                queueWechatAttachmentAction(async () => {
+                  logBridgeAttachment(authorizedUserId, "voice", voicePath);
+                  return await transport.sendVoice(voicePath, authorizedUserId);
+                }),
               sendVideo: (videoPath) =>
-                queueWechatAttachmentAction(() =>
-                  transport.sendVideo(videoPath, { recipientId: authorizedUserId }),
-                ),
+                queueWechatAttachmentAction(async () => {
+                  logBridgeAttachment(authorizedUserId, "video", videoPath);
+                  return await transport.sendVideo(videoPath, { recipientId: authorizedUserId });
+                }),
             },
           });
         });
@@ -1105,6 +1181,7 @@ async function handleInboundMessage(params: {
     outputBatcher,
     deferInboundMessage,
   } = params;
+  logBridgeTranscript("wechat->cli", `sender=${message.senderId}`, message.text);
   const state = stateStore.getState();
   const systemCommand = parseWechatControlCommand(message.text, {
     adapter: options.adapter,

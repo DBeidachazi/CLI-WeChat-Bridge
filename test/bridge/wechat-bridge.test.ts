@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   canDrainDeferredCodexInboundQueue,
+  formatBridgeAttachmentLogEntry,
+  formatBridgeTranscriptLogEntry,
   formatDeferredCodexInboundQueueMessage,
   formatUserFacingInboundError,
   formatWechatSendFailureLogEntry,
@@ -78,6 +80,30 @@ describe("wechat-bridge cli helpers", () => {
       }),
     ).toBe(
       "wechat_send_failed: context=thread_switched recipient=owner@im.wechat error=Error: HTTP 503: upstream unavailable",
+    );
+  });
+
+  test("formatBridgeTranscriptLogEntry keeps multi-line transcript output readable", () => {
+    expect(
+      formatBridgeTranscriptLogEntry({
+        direction: "wechat->cli",
+        label: "sender=owner@im.wechat",
+        text: "hello\nworld",
+      }),
+    ).toBe(
+      "[transcript] wechat->cli sender=owner@im.wechat\n  hello\n  world",
+    );
+  });
+
+  test("formatBridgeAttachmentLogEntry records recipient, kind, and file path", () => {
+    expect(
+      formatBridgeAttachmentLogEntry({
+        recipientId: "owner@im.wechat",
+        kind: "file",
+        filePath: "/tmp/result.txt",
+      }),
+    ).toBe(
+      "[transcript] cli->wechat attachment recipient=owner@im.wechat kind=file path=/tmp/result.txt",
     );
   });
 

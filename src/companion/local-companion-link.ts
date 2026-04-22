@@ -92,7 +92,12 @@ function normalizeEndpoint(value: unknown): LocalCompanionEndpoint | null {
 
   const record = value as Record<string, unknown>;
   const kind =
-    record.kind === "codex" || record.kind === "claude" || record.kind === "opencode" || record.kind === "shell"
+    record.kind === "codex" ||
+    record.kind === "claude" ||
+    record.kind === "opencode" ||
+    record.kind === "gemini" ||
+    record.kind === "copilot" ||
+    record.kind === "shell"
       ? record.kind
       : "codex";
   const sharedSessionId =
