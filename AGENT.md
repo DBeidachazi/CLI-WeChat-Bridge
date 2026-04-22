@@ -49,4 +49,7 @@ This repository bridges WeChat messages into local CLI agents such as Codex, Cla
 - WeChat image key parsing must remain compatible with both direct hex keys and `base64(hex)` `media.aes_key` values, because runtime failures otherwise surface as Gemini `Provided image is not valid` errors.
 - Gemini can also fail on outbound image attempts when the model downloads a non-image file with an image extension; bridge behavior should prefer recovering the session instead of leaving later text-only turns stuck in the same invalid-image state.
 - WeChat should treat `/new` as a reset-style control alias, because users naturally try chat-style reset wording from the phone.
+- WeChat command routing is now split:
+  - outer bridge commands such as `/help`, `/status`, `/model`, `/reset`, and `/stop`
+  - inner AI passthrough commands via `/ai ...`, which should forward slash commands into the active model session without outer interception
 - Remaining verification work is now runtime validation on the target host and any follow-up fixes from CI or environment-specific behavior.

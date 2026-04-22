@@ -362,6 +362,18 @@ export class BridgeStateStore {
     this.save();
   }
 
+  setAdapterSelection(adapter: BridgeAdapterKind, command: string, profile?: string): void {
+    this.state.adapter = adapter;
+    this.state.command = command;
+    this.state.profile = profile;
+    this.state.sharedSessionId = undefined;
+    this.state.sharedThreadId = undefined;
+    this.state.resumeConversationId = undefined;
+    this.state.transcriptPath = undefined;
+    this.state.pendingConfirmation = null;
+    this.save();
+  }
+
   setSharedSessionId(sessionId: string): void {
     this.state.sharedSessionId = sessionId;
     this.state.sharedThreadId = this.state.adapter === "codex" ? sessionId : undefined;

@@ -39,6 +39,27 @@ describe("parseSystemCommand", () => {
     expect(parseSystemCommand("/resume 2")).toEqual({ type: "resume", target: "2" });
     expect(parseSystemCommand("/new")).toEqual({ type: "reset" });
     expect(parseSystemCommand("/reset")).toEqual({ type: "reset" });
+    expect(parseSystemCommand("/help")).toEqual({ type: "help" });
+    expect(parseSystemCommand("/model gemini")).toEqual({
+      type: "switch_model",
+      adapter: "gemini",
+    });
+    expect(parseSystemCommand("/wechatmodel gemini")).toEqual({
+      type: "switch_model",
+      adapter: "gemini",
+    });
+    expect(parseSystemCommand("/ai status")).toEqual({
+      type: "ai_passthrough",
+      text: "/status",
+    });
+    expect(parseSystemCommand("/ai /model gpt-5.4")).toEqual({
+      type: "ai_passthrough",
+      text: "/model gpt-5.4",
+    });
+    expect(parseSystemCommand("/ai")).toEqual({
+      type: "ai_passthrough",
+      text: "/help",
+    });
     expect(parseSystemCommand("/stop")).toEqual({ type: "stop" });
     expect(parseSystemCommand("/confirm 123456")).toEqual({
       type: "confirm",
@@ -50,6 +71,8 @@ describe("parseSystemCommand", () => {
   test("returns null for unsupported input", () => {
     expect(parseSystemCommand("hello")).toBeNull();
     expect(parseSystemCommand("/unknown foo")).toBeNull();
+    expect(parseSystemCommand("/model unknown")).toBeNull();
+    expect(parseSystemCommand("/wechatmodel unknown")).toBeNull();
   });
 });
 

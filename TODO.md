@@ -1,8 +1,6 @@
 # TODO
 
-- Add `/wechatmodel <gemini|codex|copilot>` as a WeChat control command.
-  Expected behavior:
-  - intercept the command before normal prompt forwarding
-  - switch the active WeChat-facing model/adapter target accordingly
-  - replace the current model selection for subsequent turns
-  - return a clear confirmation message to WeChat after the switch
+- Validate the new split command surface on the live WeChat bridge:
+  - `/model <gemini|codex|copilot|claude|opencode|shell>` stays in the outer bridge layer and switches adapters before normal prompt forwarding
+  - `/ai <command>` forwards slash commands directly into the inner AI session, e.g. `/ai status` -> `/status`, `/ai model gpt-5.4` -> `/model gpt-5.4`
+  - startup-time adapter switching should work even when the default Codex companion is not connected

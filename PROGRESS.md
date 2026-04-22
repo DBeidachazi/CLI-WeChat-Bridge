@@ -44,6 +44,10 @@
 - Hardened inbound image download handling so encrypted CDN URLs are preferred over plain `image_item.url`, and invalid decrypted image payloads are rejected before they are forwarded into Gemini/Copilot ACP prompts.
 - Added Gemini session recovery for `Provided image is not valid` task failures so later text turns are not stuck behind the same bad multimodal state.
 - Added `/new` as a WeChat alias for `/reset`, matching the more common chat-reset wording.
+- Split WeChat command handling into outer bridge controls and inner AI passthrough commands:
+  - `/model ...` now switches the bridge adapter layer
+  - `/ai ...` now forwards slash commands into the active inner AI session, normalizing `/ai status` into `/status`
+- Allowed startup-time adapter switching from WeChat before a disconnected default Codex companion blocks ordinary prompt forwarding.
 
 ## In Progress
 
@@ -52,6 +56,8 @@
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
   - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
   - confirm a bad outbound Gemini image candidate no longer poisons later text-only turns
+  - confirm `/model gemini` works from WeChat even when the default Codex companion is disconnected
+  - confirm `/ai status` and `/ai model ...` reach the inner AI instead of being intercepted by the outer bridge
   - confirm inbound voice/file/video handling remains stable
   - inspect any host-specific path, dependency, or credential issues on `192.168.1.111`
 

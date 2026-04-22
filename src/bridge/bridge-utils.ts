@@ -25,6 +25,9 @@ export type SystemCommand =
   | { type: "resume"; target?: string }
   | { type: "stop" }
   | { type: "reset" }
+  | { type: "help" }
+  | { type: "ai_passthrough"; text: string }
+  | { type: "switch_model"; adapter: "gemini" | "codex" | "copilot" | "claude" | "opencode" | "shell" }
   | { type: "confirm"; code?: string }
   | { type: "deny" };
 
@@ -208,6 +211,18 @@ export function parseSystemCommand(text: string): SystemCommand | null {
     return null;
   }
 
+  if (/^\/ai(?:\s|$)/i.test(trimmed)) {
+    const payload = trimmed.replace(/^\/ai\s*/i, "").trim();
+    if (!payload) {
+      return { type: "ai_passthrough", text: "/help" };
+    }
+
+    return {
+      type: "ai_passthrough",
+      text: payload.startsWith("/") ? payload : `/${payload}`,
+    };
+  }
+
   const [rawCommand, ...rest] = trimmed.split(/\s+/);
   const command = rawCommand.toLowerCase();
   const argument = rest.join(" ").trim();
@@ -222,6 +237,24 @@ export function parseSystemCommand(text: string): SystemCommand | null {
     case "/new":
     case "/reset":
       return { type: "reset" };
+    case "/help":
+      return { type: "help" };
+    case "/model":
+    case "/wechatmodel":
+      if (
+        argument === "gemini" ||
+        argument === "codex" ||
+        argument === "copilot" ||
+        argument === "claude" ||
+        argument === "opencode" ||
+        argument === "shell"
+      ) {
+        return {
+          type: "switch_model",
+          adapter: argument,
+        };
+      }
+      return null;
     case "/confirm":
       return argument ? { type: "confirm", code: argument } : null;
     case "/deny":
