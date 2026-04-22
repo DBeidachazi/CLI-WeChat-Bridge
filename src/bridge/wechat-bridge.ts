@@ -300,17 +300,17 @@ function getRuntimeAdapterRenderMode(
 
 function formatWechatControlHelp(currentAdapter: BridgeAdapterKind): string {
   return [
-    `Current adapter: ${currentAdapter}`,
-    "WeChat bridge commands:",
-    "/help - show this help",
-    "/status - show bridge status",
-    "/model <gemini|codex|copilot|claude|opencode|shell> - switch adapter",
-    "/ai <command> - send a slash command directly to the inner AI",
-    "/ai status - send /status to the inner AI",
-    "/ai model gpt-5.4 - send /model gpt-5.4 to the inner AI",
-    "/new - reset the current session",
-    "/reset - reset the current session",
-    "/stop - interrupt the active turn",
+    `当前适配器：${currentAdapter}`,
+    "微信桥接命令：",
+    "/help - 显示这份帮助",
+    "/status - 查看桥接状态",
+    "/model <gemini|codex|copilot|claude|opencode|shell> - 切换外层适配器",
+    "/ai <命令> - 直接把斜杠命令发送给内部 AI",
+    "/ai status - 给内部 AI 发送 /status",
+    "/ai model gpt-5.4 - 给内部 AI 发送 /model gpt-5.4",
+    "/new - 重置当前会话",
+    "/reset - 重置当前会话",
+    "/stop - 中断当前任务",
   ].join("\n");
 }
 
@@ -560,7 +560,28 @@ async function main(): Promise<void> {
     await queueWechatMessage(stateStore.getState().authorizedUserId, text);
   });
   const wireCurrentAdapter = () => {
-    wireCurrentAdapter();
+    wireAdapterEvents({
+      adapter,
+      options,
+      transport,
+      stateStore,
+      outputBatcher,
+      queueWechatAttachmentAction,
+      queueWechatMessage,
+      maybeDrainDeferredInboundMessages,
+      getActiveTask: () => activeTask,
+      clearActiveTask: () => {
+        activeTask = null;
+        lastHeartbeatAt = 0;
+      },
+      updateLastOutputAt: () => {
+        lastOutputAt = Date.now();
+      },
+      syncSharedSessionState: () => {
+        syncSharedSessionState(stateStore, adapter);
+      },
+      requestShutdown,
+    });
   };
   const switchWechatAdapter = async (nextAdapter: WechatModelSwitchTarget): Promise<string> => {
     const adapterState = adapter.getState();
