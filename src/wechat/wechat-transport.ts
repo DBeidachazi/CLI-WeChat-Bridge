@@ -679,19 +679,27 @@ async function uploadBufferToCdn(params: {
   return { downloadParam };
 }
 
-function decodeWechatAesKey(
+function isHexString(value: string): boolean {
+  return /^[0-9a-fA-F]+$/.test(value);
+}
+
+function decodeHexAesKey(encoded: string): Buffer | null {
+  const normalized = encoded.trim();
+  if (!normalized || normalized.length % 2 !== 0 || !isHexString(normalized)) {
+    return null;
+  }
+
+  const decoded = Buffer.from(normalized, "hex");
+  return decoded.length === 16 ? decoded : null;
+}
+
+export function decodeWechatAesKey(
   media?: CDNMedia,
   preferredHex?: string,
 ): Buffer | null {
-  if (preferredHex?.trim()) {
-    try {
-      const decoded = Buffer.from(preferredHex.trim(), "hex");
-      if (decoded.length === 16) {
-        return decoded;
-      }
-    } catch {
-      // Fall back to base64.
-    }
+  const preferredDecoded = preferredHex ? decodeHexAesKey(preferredHex) : null;
+  if (preferredDecoded) {
+    return preferredDecoded;
   }
 
   const encoded = media?.aes_key?.trim();
@@ -704,6 +712,12 @@ function decodeWechatAesKey(
     if (decoded.length === 16) {
       return decoded;
     }
+
+    const decodedUtf8 = decoded.toString("utf8").trim();
+    const decodedHex = decodeHexAesKey(decodedUtf8);
+    if (decodedHex) {
+      return decodedHex;
+    }
   } catch {
     return null;
   }
@@ -712,11 +726,6 @@ function decodeWechatAesKey(
 }
 
 function buildCdnDownloadUrl(target: InboundMediaDownloadTarget): string | null {
-  const directUrl = target.directUrl?.trim();
-  if (directUrl && /^https?:\/\//i.test(directUrl)) {
-    return directUrl;
-  }
-
   const fullUrl = target.media?.full_url?.trim();
   if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
     return fullUrl;
@@ -724,6 +733,10 @@ function buildCdnDownloadUrl(target: InboundMediaDownloadTarget): string | null 
 
   const encryptedQueryParam = target.media?.encrypt_query_param?.trim();
   if (!encryptedQueryParam) {
+    const directUrl = target.directUrl?.trim();
+    if (directUrl && /^https?:\/\//i.test(directUrl)) {
+      return directUrl;
+    }
     return null;
   }
 
@@ -816,6 +829,51 @@ function inferAttachmentExtension(
   return MEDIA_KIND_DEFAULT_EXTENSIONS[kind];
 }
 
+function isProbablyImagePayload(payload: Buffer): boolean {
+  return (
+    (payload.length >= 3 &&
+      payload[0] === 0xff &&
+      payload[1] === 0xd8 &&
+      payload[2] === 0xff) ||
+    (payload.length >= 8 &&
+      payload[0] === 0x89 &&
+      payload[1] === 0x50 &&
+      payload[2] === 0x4e &&
+      payload[3] === 0x47 &&
+      payload[4] === 0x0d &&
+      payload[5] === 0x0a &&
+      payload[6] === 0x1a &&
+      payload[7] === 0x0a) ||
+    (payload.length >= 6 &&
+      (payload.subarray(0, 6).equals(Buffer.from("GIF87a")) ||
+        payload.subarray(0, 6).equals(Buffer.from("GIF89a")))) ||
+    (payload.length >= 12 &&
+      payload.subarray(0, 4).equals(Buffer.from("RIFF")) &&
+      payload.subarray(8, 12).equals(Buffer.from("WEBP")))
+  );
+}
+
+function decodeInboundMediaPayload(
+  ciphertext: Buffer,
+  aesKey: Buffer,
+  target: InboundMediaDownloadTarget,
+): Buffer {
+  const decrypted = decryptWechatCdnPayload(ciphertext, aesKey);
+  if (target.kind !== "image") {
+    return decrypted;
+  }
+
+  if (isProbablyImagePayload(decrypted)) {
+    return decrypted;
+  }
+
+  if (isProbablyImagePayload(ciphertext)) {
+    return ciphertext;
+  }
+
+  throw new Error("Inbound image payload is not a valid image after download/decrypt");
+}
+
 async function downloadInboundMedia(
   account: AccountData,
   cacheKey: string,
@@ -833,7 +891,7 @@ async function downloadInboundMedia(
   }
 
   const ciphertext = Buffer.from(await response.arrayBuffer());
-  const plaintext = decryptWechatCdnPayload(ciphertext, aesKey);
+  const plaintext = decodeInboundMediaPayload(ciphertext, aesKey, target);
   const mimeType =
     target.mimeType ??
     inferAttachmentMimeType(target.kind, target.title, target.directUrl);

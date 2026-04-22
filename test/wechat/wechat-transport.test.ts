@@ -8,6 +8,7 @@ import {
   buildInboundMessageClaimPath,
   clearInboundMessageClaims,
   classifyWechatTransportError,
+  decodeWechatAesKey,
   describeWechatTransportError,
   formatByteSize,
   resolveMediaUploadLimitBytes,
@@ -52,6 +53,26 @@ describe("wechat upload limits", () => {
     expect(formatByteSize(512)).toBe("512 B");
     expect(formatByteSize(1_536)).toBe("1.5 KB");
     expect(formatByteSize(20 * 1024 * 1024)).toBe("20.0 MB");
+  });
+
+  test("decodes inbound aes keys from either hex or base64-encoded hex", () => {
+    const rawKey = Buffer.from("00112233445566778899aabbccddeeff", "hex");
+
+    expect(
+      decodeWechatAesKey(undefined, "00112233445566778899aabbccddeeff")?.equals(rawKey),
+    ).toBe(true);
+
+    expect(
+      decodeWechatAesKey({
+        aes_key: Buffer.from("00112233445566778899aabbccddeeff", "utf8").toString("base64"),
+      })?.equals(rawKey),
+    ).toBe(true);
+
+    expect(
+      decodeWechatAesKey({
+        aes_key: rawKey.toString("base64"),
+      })?.equals(rawKey),
+    ).toBe(true);
   });
 
   test("classifies transient fetch failures as retryable network errors", () => {

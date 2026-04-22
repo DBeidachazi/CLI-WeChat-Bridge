@@ -45,5 +45,6 @@ This repository bridges WeChat messages into local CLI agents such as Codex, Cla
 
 - First-turn multimodal capability discovery is now documented and injected into inbound prompts.
 - Shared skill synchronization now targets `.aiskill/skills` with legacy `.linkai/skills` compatibility.
-- Inbound WeChat image/media ingestion now downloads and decrypts inbound media into local files and forwards compatible attachments into ACP prompts.
+- Inbound WeChat image/media ingestion now downloads and decrypts inbound media into local files, prefers encrypted CDN references over plain image URLs, and forwards compatible attachments into ACP prompts.
+- WeChat image key parsing must remain compatible with both direct hex keys and `base64(hex)` `media.aes_key` values, because runtime failures otherwise surface as Gemini `Provided image is not valid` errors.
 - Remaining verification work is now runtime validation on the target host and any follow-up fixes from CI or environment-specific behavior.

@@ -40,13 +40,15 @@
 - Added inbound WeChat media parsing for `image`, `voice`, `file`, and `video` items, with CDN download + AES-128-ECB decryption into local cached files.
 - Wired ACP prompt construction to inline inbound WeChat images as multimodal prompt content when the target agent advertises image prompt capability, and otherwise fall back to local `resource_link` references.
 - Updated WeChat fetch formatting and prompt tests to expose inbound attachment paths and multimodal prompt content behavior.
+- Fixed inbound WeChat image decoding to accept both direct hex keys and `base64(hex)` `media.aes_key` values, matching the OpenClaw Weixin media format more closely.
+- Hardened inbound image download handling so encrypted CDN URLs are preferred over plain `image_item.url`, and invalid decrypted image payloads are rejected before they are forwarded into Gemini/Copilot ACP prompts.
 
 ## In Progress
 
 - Cleaning up remaining TypeScript/test drift that already existed in the repo alongside the new ACP changes.
 - Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
-  - confirm inbound WeChat images reach Gemini/Copilot on the first turn
+  - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
   - confirm inbound voice/file/video handling remains stable
   - inspect any host-specific path, dependency, or credential issues on `192.168.1.111`
 
@@ -55,5 +57,6 @@
 - Gemini ACP probing succeeded and returned live mode/model metadata plus a real prompt response.
 - Copilot ACP probing succeeded and returned live mode/model/config metadata plus a real prompt response.
 - Rebuilt the Docker image and verified inside the live container that `/app/node_modules/node-pty/build/Release/pty.node` exists and `require("node-pty")` succeeds.
+- Live host logs confirmed that inbound WeChat images are now being downloaded and attached into Gemini prompts, but one runtime sample failed with `Provided image is not valid`; this change set targets that decode/validation gap.
 - The repo still has pre-existing strict TypeScript issues outside this change set, so validation is being done incrementally with runnable entrypoints and targeted checks.
-- On the current Windows host, `bun` is not installed, so Bun-based tests could not be executed locally in this pass; validation was limited to diff sanity checks and file-level review.
+- Bun is now available on the current Windows host at `C:\Users\26950\scoop\shims\bun.exe`, so targeted Bun tests are being used for transport and ACP verification.
