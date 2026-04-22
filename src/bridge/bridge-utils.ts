@@ -219,6 +219,7 @@ export function parseSystemCommand(text: string): SystemCommand | null {
       return argument ? { type: "resume", target: argument } : { type: "resume" };
     case "/stop":
       return { type: "stop" };
+    case "/new":
     case "/reset":
       return { type: "reset" };
     case "/confirm":

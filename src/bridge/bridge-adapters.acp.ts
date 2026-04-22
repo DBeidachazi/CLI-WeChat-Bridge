@@ -173,6 +173,17 @@ function readAgentPromptCapabilities(
   };
 }
 
+function shouldResetSessionAfterTaskFailure(
+  kind: AcpBridgeAdapterKind,
+  errorMessage: string,
+): boolean {
+  if (kind !== "gemini") {
+    return false;
+  }
+
+  return /provided image is not valid/i.test(errorMessage);
+}
+
 export class AcpCliAdapter implements BridgeAdapter {
   private readonly options: {
     kind: AcpBridgeAdapterKind;
@@ -347,10 +358,25 @@ export class AcpCliAdapter implements BridgeAdapter {
           return;
         }
 
-        this.setStatus("error");
+        const errorMessage = describeUnknownError(error);
+        let sessionResetSuffix = "";
+        if (shouldResetSessionAfterTaskFailure(this.options.kind, errorMessage)) {
+          try {
+            await this.createSession(true);
+            sessionResetSuffix =
+              "\nThe Gemini session was reset after the invalid image error. Use /reset or /new if you want to clear the conversation explicitly.";
+            this.setStatus("idle");
+          } catch (resetError) {
+            sessionResetSuffix = `\nAutomatic Gemini session reset also failed: ${describeUnknownError(resetError)}`;
+            this.setStatus("error");
+          }
+        } else {
+          this.setStatus("error");
+        }
+
         this.emit({
           type: "task_failed",
-          message: describeUnknownError(error),
+          message: `${errorMessage}${sessionResetSuffix}`,
           timestamp: nowIso(),
         });
       } finally {

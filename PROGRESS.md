@@ -42,6 +42,8 @@
 - Updated WeChat fetch formatting and prompt tests to expose inbound attachment paths and multimodal prompt content behavior.
 - Fixed inbound WeChat image decoding to accept both direct hex keys and `base64(hex)` `media.aes_key` values, matching the OpenClaw Weixin media format more closely.
 - Hardened inbound image download handling so encrypted CDN URLs are preferred over plain `image_item.url`, and invalid decrypted image payloads are rejected before they are forwarded into Gemini/Copilot ACP prompts.
+- Added Gemini session recovery for `Provided image is not valid` task failures so later text turns are not stuck behind the same bad multimodal state.
+- Added `/new` as a WeChat alias for `/reset`, matching the more common chat-reset wording.
 
 ## In Progress
 
@@ -49,6 +51,7 @@
 - Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
   - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
+  - confirm a bad outbound Gemini image candidate no longer poisons later text-only turns
   - confirm inbound voice/file/video handling remains stable
   - inspect any host-specific path, dependency, or credential issues on `192.168.1.111`
 
@@ -58,5 +61,6 @@
 - Copilot ACP probing succeeded and returned live mode/model/config metadata plus a real prompt response.
 - Rebuilt the Docker image and verified inside the live container that `/app/node_modules/node-pty/build/Release/pty.node` exists and `require("node-pty")` succeeds.
 - Live host logs confirmed that inbound WeChat images are now being downloaded and attached into Gemini prompts, but one runtime sample failed with `Provided image is not valid`; this change set targets that decode/validation gap.
+- Live host logs also showed an outbound-side failure mode: Gemini downloaded `/app/anime_sample.png` as a 100-byte plain-text `File not found` response, then kept failing later turns with the same invalid image state until the session was reset.
 - The repo still has pre-existing strict TypeScript issues outside this change set, so validation is being done incrementally with runnable entrypoints and targeted checks.
 - Bun is now available on the current Windows host at `C:\Users\26950\scoop\shims\bun.exe`, so targeted Bun tests are being used for transport and ACP verification.
