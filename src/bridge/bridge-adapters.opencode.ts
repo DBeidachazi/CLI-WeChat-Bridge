@@ -19,12 +19,14 @@ import {
 import type {
   ApprovalRequest,
   BridgeAdapter,
+  BridgeAdapterInput,
   BridgeAdapterState,
   BridgeSessionSwitchReason,
   BridgeSessionSwitchSource,
   BridgeResumeSessionCandidate,
   BridgeTurnOrigin,
   BridgeEvent,
+  BridgeUserInput,
   PendingApproval,
 } from "./bridge-types.ts";
 import { killProcessTreeSync } from "./bridge-process-reaper.ts";
@@ -303,7 +305,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
   }
 
-  async sendInput(text: string): Promise<void> {
+  async sendInput(input: BridgeAdapterInput): Promise<void> {
+    const text = typeof input === "string" ? input : input.text;
     if (!this.client) {
       throw new Error("OpenCode adapter is not running.");
     }

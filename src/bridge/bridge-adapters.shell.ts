@@ -1,4 +1,4 @@
-import type { ApprovalRequest } from "./bridge-types.ts";
+import type { ApprovalRequest, BridgeAdapterInput } from "./bridge-types.ts";
 import {
   getInteractiveShellCommandRejectionMessage,
   isHighRiskShellCommand,
@@ -83,7 +83,8 @@ export class ShellAdapter extends AbstractPtyAdapter {
     }
   }
 
-  override async sendInput(text: string): Promise<void> {
+  override async sendInput(input: BridgeAdapterInput): Promise<void> {
+    const text = typeof input === "string" ? input : input.text;
     if (!this.pty) {
       throw new Error("shell adapter is not running.");
     }

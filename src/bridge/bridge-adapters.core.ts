@@ -16,10 +16,12 @@ import type {
   ApprovalRequest,
   BridgeAdapter,
   BridgeAdapterKind,
+  BridgeAdapterInput,
   BridgeAdapterState,
   BridgeEvent,
   BridgeLifecycleMode,
   BridgeResumeSessionCandidate,
+  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -141,10 +143,10 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     });
   }
 
-  async sendInput(text: string): Promise<void> {
+  async sendInput(input: BridgeAdapterInput): Promise<void> {
     await this.sendRequest({
       command: "send_input",
-      text,
+      input: typeof input === "string" ? { text: input } : input,
     });
   }
 
@@ -604,11 +606,13 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
     }
   }
 
-  async sendInput(text: string): Promise<void> {
+  async sendInput(input: BridgeAdapterInput): Promise<void> {
     if (!this.pty) {
       throw new Error(`${this.options.kind} adapter is not running.`);
     }
 
+    const normalizedInput = typeof input === "string" ? { text: input } : input;
+    const text = normalizedInput.text;
     this.hasAcceptedInput = true;
     this.currentPreview = truncatePreview(text);
     this.state.lastInputAt = nowIso();

@@ -18,6 +18,7 @@ import {
 import type {
   ApprovalRequest,
   BridgeAdapter,
+  BridgeAdapterInput,
   BridgeAdapterState,
   BridgeEvent,
   BridgeResumeSessionCandidate,
@@ -28,6 +29,10 @@ import {
   isRecord,
   resolveSpawnTarget,
 } from "./bridge-adapters.shared.ts";
+import {
+  buildAcpPromptContent,
+  type AcpPromptCapabilities,
+} from "./bridge-acp-prompt.ts";
 import {
   normalizeOutput,
   nowIso,
@@ -147,6 +152,27 @@ function buildPermissionRequest(kind: AcpBridgeAdapterKind, params: acp.RequestP
   };
 }
 
+function readAgentPromptCapabilities(
+  initializeResponse: unknown,
+): AcpPromptCapabilities {
+  if (!isRecord(initializeResponse)) {
+    return { image: false, audio: false };
+  }
+
+  const agentCapabilities = isRecord(initializeResponse.agentCapabilities)
+    ? initializeResponse.agentCapabilities
+    : null;
+  const promptCapabilities =
+    agentCapabilities && isRecord(agentCapabilities.promptCapabilities)
+      ? agentCapabilities.promptCapabilities
+      : null;
+
+  return {
+    image: promptCapabilities?.image === true,
+    audio: promptCapabilities?.audio === true,
+  };
+}
+
 export class AcpCliAdapter implements BridgeAdapter {
   private readonly options: {
     kind: AcpBridgeAdapterKind;
@@ -165,6 +191,10 @@ export class AcpCliAdapter implements BridgeAdapter {
   private currentPromptPromise: Promise<void> | null = null;
   private pendingPermission: PendingPermissionRequest | null = null;
   private readonly terminals = new Map<string, ManagedTerminal>();
+  private promptCapabilities: AcpPromptCapabilities = {
+    image: false,
+    audio: false,
+  };
   private shuttingDown = false;
 
   constructor(options: {
@@ -224,7 +254,7 @@ export class AcpCliAdapter implements BridgeAdapter {
         Readable.toWeb(child.stdout),
       );
       this.connection = new acp.ClientSideConnection(() => this.buildClient(), stream);
-      await this.connection.initialize({
+      const initializeResponse = await this.connection.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
         clientInfo: {
           name: "cli-wechat-bridge",
@@ -239,6 +269,7 @@ export class AcpCliAdapter implements BridgeAdapter {
           terminal: true,
         },
       });
+      this.promptCapabilities = readAgentPromptCapabilities(initializeResponse as unknown);
 
       if (this.options.initialSharedSessionId) {
         await this.restoreSession(this.options.initialSharedSessionId, true);
@@ -253,7 +284,7 @@ export class AcpCliAdapter implements BridgeAdapter {
     }
   }
 
-  async sendInput(text: string): Promise<void> {
+  async sendInput(input: BridgeAdapterInput): Promise<void> {
     if (!this.connection) {
       throw new Error(`${this.options.kind} ACP adapter is not running.`);
     }
@@ -271,6 +302,8 @@ export class AcpCliAdapter implements BridgeAdapter {
     }
 
     const sessionId = this.currentSessionId;
+    const normalizedInput = typeof input === "string" ? { text: input } : input;
+    const text = normalizedInput.text;
     this.state.lastInputAt = nowIso();
     this.currentAssistantText = "";
     this.setStatus("busy");
@@ -279,12 +312,7 @@ export class AcpCliAdapter implements BridgeAdapter {
       try {
         const response = await this.connection!.prompt({
           sessionId,
-          prompt: [
-            {
-              type: "text",
-              text,
-            },
-          ],
+          prompt: buildAcpPromptContent(normalizedInput, this.promptCapabilities) as acp.ContentBlock[],
         });
 
         const finalText = normalizeOutput(this.currentAssistantText).trim();

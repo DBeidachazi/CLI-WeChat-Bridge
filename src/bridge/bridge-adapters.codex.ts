@@ -3,10 +3,12 @@ import path from "node:path";
 import { spawn as spawnChild } from "node:child_process";
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import type {
+  BridgeAdapterInput,
   BridgeResumeSessionCandidate,
   BridgeThreadSwitchReason,
   BridgeThreadSwitchSource,
   BridgeTurnOrigin,
+  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -197,7 +199,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.startSessionPolling();
   }
 
-  override async sendInput(text: string): Promise<void> {
+  override async sendInput(input: BridgeAdapterInput): Promise<void> {
+    const text = typeof input === "string" ? input : input.text;
     if (this.isNativePanelMode()) {
       await this.sendPanelTurn(text);
       return;

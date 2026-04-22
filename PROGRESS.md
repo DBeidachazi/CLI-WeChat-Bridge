@@ -36,15 +36,19 @@
 - Added automatic generation of a shared `wechat-bridge-multimodal` skill so Codex, Gemini, and Copilot can discover WeChat multimodal input/output conventions from the shared skills directory.
 - Updated inbound WeChat prompt construction so the first turn now explicitly tells the model that the bridge supports multimodal WeChat input/output, voice transcripts, and `wechat-attachments` media replies.
 - Updated README and prompt-oriented tests to match the new shared skill layout and first-turn multimodal capability note.
+- Extended inbound bridge input from plain text to `text + attachments`, while keeping the old string-based adapter entrypoints backward-compatible.
+- Added inbound WeChat media parsing for `image`, `voice`, `file`, and `video` items, with CDN download + AES-128-ECB decryption into local cached files.
+- Wired ACP prompt construction to inline inbound WeChat images as multimodal prompt content when the target agent advertises image prompt capability, and otherwise fall back to local `resource_link` references.
+- Updated WeChat fetch formatting and prompt tests to expose inbound attachment paths and multimodal prompt content behavior.
 
 ## In Progress
 
 - Cleaning up remaining TypeScript/test drift that already existed in the repo alongside the new ACP changes.
-- Extending inbound WeChat multimodal ingestion beyond text and voice transcript:
-  - download/decrypt inbound WeChat images and media to local files
-  - attach those files to ACP prompts for Gemini/Copilot on the first turn
-  - keep non-ACP adapters compatible while that path is introduced incrementally
 - Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
+- End-to-end runtime verification on the target iStoreOS host after CI completes:
+  - confirm inbound WeChat images reach Gemini/Copilot on the first turn
+  - confirm inbound voice/file/video handling remains stable
+  - inspect any host-specific path, dependency, or credential issues on `192.168.1.111`
 
 ## Notes
 

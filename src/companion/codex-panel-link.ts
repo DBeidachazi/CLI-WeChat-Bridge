@@ -6,10 +6,10 @@ import {
   ensureWorkspaceChannelDir,
   getWorkspaceChannelPaths,
 } from "../wechat/channel-config.ts";
-import type { BridgeAdapterState, BridgeEvent } from "../bridge/bridge-types.ts";
+import type { BridgeAdapterState, BridgeEvent, BridgeUserInput } from "../bridge/bridge-types.ts";
 
 export type CodexPanelCommand =
-  | { command: "send_input"; text: string }
+  | { command: "send_input"; input: BridgeUserInput }
   | { command: "list_resume_sessions"; limit?: number }
   | { command: "list_resume_threads"; limit?: number }
   | { command: "resume_session"; sessionId: string }

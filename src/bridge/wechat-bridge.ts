@@ -24,6 +24,7 @@ import type {
   PendingApproval,
 } from "./bridge-types.ts";
 import {
+  buildWechatInboundAttachmentSection,
   buildWechatInboundPrompt,
   buildOneTimeCode,
   formatApprovalMessage,
@@ -1356,12 +1357,21 @@ async function dispatchInboundWechatText(params: {
   adapter: BridgeAdapter;
 }): Promise<ActiveTask> {
   const { message, options, stateStore, adapter } = params;
+  const promptText = buildWechatInboundPrompt(message.text, message.attachments);
+  const previewSource =
+    message.text.trim() ||
+    (message.attachments.length > 0
+      ? buildWechatInboundAttachmentSection(message.attachments)
+      : "");
   const activeTask = {
     startedAt: Date.now(),
-    inputPreview: truncatePreview(message.text, 180),
+    inputPreview: truncatePreview(previewSource, 180),
   };
-  stateStore.appendLog(`Forwarded input to ${options.adapter}: ${truncatePreview(message.text)}`);
-  await adapter.sendInput(buildWechatInboundPrompt(message.text));
+  stateStore.appendLog(`Forwarded input to ${options.adapter}: ${truncatePreview(previewSource)}`);
+  await adapter.sendInput({
+    text: promptText,
+    attachments: message.attachments,
+  });
   return activeTask;
 }
 

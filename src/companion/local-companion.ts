@@ -212,9 +212,9 @@ async function main(): Promise<void> {
     message: Extract<LocalCompanionMessage, { type: "request" }>,
   ) => {
     try {
-      switch (message.payload.command) {
+        switch (message.payload.command) {
         case "send_input":
-          await adapter.sendInput(message.payload.text);
+          await adapter.sendInput(message.payload.input);
           sendResponse(socket, message.id, true);
           break;
         case "list_resume_sessions":

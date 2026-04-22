@@ -153,7 +153,7 @@ async function main(): Promise<void> {
       try {
         switch (message.payload.command) {
           case "send_input":
-            await adapter.sendInput(message.payload.text);
+            await adapter.sendInput(message.payload.input);
             sendResponse(message.id, true);
             break;
           case "list_resume_sessions":

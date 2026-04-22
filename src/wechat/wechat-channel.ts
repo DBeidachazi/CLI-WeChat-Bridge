@@ -279,6 +279,13 @@ function formatFetchedMessages(messages: InboundWechatMessage[]): string {
       `sender: ${message.sender}`,
       `session_id: ${message.sessionId || "(unknown)"}`,
       `created_at: ${message.createdAt}`,
+      `attachments: ${message.attachments.length}`,
+      ...(message.attachments.length > 0
+        ? message.attachments.map(
+            (attachment) =>
+              `attachment: ${attachment.kind} ${attachment.path}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}`,
+          )
+        : []),
       "text:",
       message.text,
     ].join("\n"),

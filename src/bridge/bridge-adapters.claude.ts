@@ -20,10 +20,12 @@ import {
 } from "./claude-hooks.ts";
 import type {
   ApprovalRequest,
+  BridgeAdapterInput,
   BridgeNoticeLevel,
   BridgeResumeSessionCandidate,
   BridgeThreadSwitchReason,
   BridgeThreadSwitchSource,
+  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -127,7 +129,8 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
   }
 
-  override async sendInput(text: string): Promise<void> {
+  override async sendInput(input: BridgeAdapterInput): Promise<void> {
+    const text = typeof input === "string" ? input : input.text;
     if (!this.pty) {
       throw new Error("claude adapter is not running.");
     }

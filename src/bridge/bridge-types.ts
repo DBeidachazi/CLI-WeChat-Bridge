@@ -56,6 +56,23 @@ export type BridgeResumeSessionCandidate = {
 
 export type BridgeResumeThreadCandidate = BridgeResumeSessionCandidate;
 
+export type BridgeInputAttachmentKind = "image" | "voice" | "file" | "video";
+
+export type BridgeInputAttachment = {
+  kind: BridgeInputAttachmentKind;
+  path: string;
+  mimeType?: string;
+  title?: string;
+  sizeBytes?: number;
+};
+
+export type BridgeUserInput = {
+  text: string;
+  attachments?: BridgeInputAttachment[];
+};
+
+export type BridgeAdapterInput = BridgeUserInput | string;
+
 export type BridgeState = {
   instanceId: string;
   adapter: BridgeAdapterKind;
@@ -180,7 +197,7 @@ export type BridgeEvent =
 export interface BridgeAdapter {
   setEventSink(sink: (event: BridgeEvent) => void): void;
   start(): Promise<void>;
-  sendInput(text: string): Promise<void>;
+  sendInput(input: BridgeAdapterInput): Promise<void>;
   listResumeSessions(limit?: number): Promise<BridgeResumeSessionCandidate[]>;
   resumeSession(sessionId: string): Promise<void>;
   interrupt(): Promise<boolean>;

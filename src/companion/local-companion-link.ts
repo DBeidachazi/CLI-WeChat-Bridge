@@ -10,10 +10,11 @@ import type {
   BridgeAdapterKind,
   BridgeAdapterState,
   BridgeEvent,
+  BridgeUserInput,
 } from "../bridge/bridge-types.ts";
 
 export type LocalCompanionCommand =
-  | { command: "send_input"; text: string }
+  | { command: "send_input"; input: BridgeUserInput }
   | { command: "list_resume_sessions"; limit?: number }
   | { command: "list_resume_threads"; limit?: number }
   | { command: "resume_session"; sessionId: string }

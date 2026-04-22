@@ -5,6 +5,7 @@ import type {
   ApprovalRequest,
   BridgeAdapterKind,
   BridgeAdapterState,
+  BridgeInputAttachment,
   BridgeResumeSessionCandidate,
   BridgeResumeThreadCandidate,
   BridgeSessionSwitchReason,
@@ -132,6 +133,7 @@ const INLINE_WINDOWS_PATH_RE =
   /(^|[^\w])`?([A-Za-z]:\\(?:[^\\/:*?"<>|\r\n`]+\\)*[^\\/:*?"<>|\r\n`]+?(?:\.\s*[A-Za-z0-9]{2,8})+)`?(?=$|[^\w])/gm;
 const INLINE_HOME_RELATIVE_PATH_RE =
   /(^|[^\w])`?((?:~[\\/])?(?:Desktop|Documents|Downloads|Pictures|Videos|Music)[\\/](?:[^\\/:*?"<>|\r\n`]+[\\/])*[^\\/:*?"<>|\r\n`]+?(?:\.\s*[A-Za-z0-9]{2,8})+)`?(?=$|[^\w])/gim;
+const ACP_PROMPT_INLINE_MEDIA_KINDS = new Set(["image", "voice"]);
 
 export type WechatAttachmentKind = (typeof WECHAT_ATTACHMENT_KINDS)[number];
 
@@ -300,8 +302,15 @@ export function shouldInjectWechatAttachmentPrompt(text: string): boolean {
 }
 
 export function buildWechatInboundPrompt(text: string): string {
+  return buildWechatInboundPromptWithAttachments(text);
+}
+
+export function buildWechatInboundPromptWithAttachments(
+  text: string,
+  attachments: BridgeInputAttachment[] = [],
+): string {
   const normalized = normalizeOutput(text).trim();
-  if (!normalized) {
+  if (!normalized && attachments.length === 0) {
     return text;
   }
 
@@ -314,8 +323,45 @@ export function buildWechatInboundPrompt(text: string): string {
     sections.push(WECHAT_ATTACHMENT_PROMPT_SUFFIX);
   }
   sections.push("[User request]");
-  sections.push(normalized);
+
+  const normalizedAttachments = attachments
+    .filter((attachment) => typeof attachment.path === "string" && attachment.path.trim())
+    .map((attachment) => ({
+      ...attachment,
+      path: path.normalize(attachment.path.trim()),
+    }));
+
+  if (normalized) {
+    sections.push(normalized);
+  } else {
+    sections.push("No plain-text body was included. Use the attached WeChat media as the primary user input.");
+  }
+
+  if (normalizedAttachments.length > 0) {
+    sections.push(buildWechatInboundAttachmentSection(normalizedAttachments));
+  }
+
   return sections.join("\n\n");
+}
+
+export function buildWechatInboundAttachmentSection(
+  attachments: BridgeInputAttachment[],
+): string {
+  const lines = ["[Inbound WeChat media]"];
+  for (const attachment of attachments) {
+    const details = [
+      attachment.kind,
+      attachment.path,
+      attachment.mimeType ? `mime=${attachment.mimeType}` : "",
+      attachment.sizeBytes ? `bytes=${attachment.sizeBytes}` : "",
+      attachment.title ? `title=${attachment.title}` : "",
+      ACP_PROMPT_INLINE_MEDIA_KINDS.has(attachment.kind)
+        ? "will also be provided as multimodal prompt content when supported"
+        : "provided as a local file reference",
+    ].filter(Boolean);
+    lines.push(`- ${details.join(" | ")}`);
+  }
+  return lines.join("\n");
 }
 
 export function parseWechatFinalReply(text: string): ParsedWechatFinalReply {

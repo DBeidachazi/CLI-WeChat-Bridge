@@ -8,6 +8,7 @@ import type {
 } from "../../src/bridge/bridge-types.ts";
 import {
   buildWechatInboundPrompt,
+  buildWechatInboundPromptWithAttachments,
   buildOneTimeCode,
   shouldInjectWechatAttachmentPrompt,
   detectCliApproval,
@@ -206,6 +207,21 @@ describe("wechat inbound prompt injection", () => {
     ].join("\n");
 
     expect(buildWechatInboundPrompt(explicitPrompt)).toBe(explicitPrompt);
+  });
+
+  test("includes inbound attachment details even when the text body is empty", () => {
+    const prompt = buildWechatInboundPromptWithAttachments("", [
+      {
+        kind: "image",
+        path: "C:\\Users\\unlin\\Desktop\\wechat-photo.png",
+        mimeType: "image/png",
+        sizeBytes: 1234,
+      },
+    ]);
+
+    expect(prompt).toContain("No plain-text body was included");
+    expect(prompt).toContain("[Inbound WeChat media]");
+    expect(prompt).toContain("wechat-photo.png");
   });
 });
 

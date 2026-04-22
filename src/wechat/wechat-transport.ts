@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createCipheriv } from "node:crypto";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -8,9 +8,11 @@ import {
   CREDENTIALS_FILE,
   ensureChannelDataDir,
   INBOUND_MESSAGE_CLAIMS_DIR,
+  CHANNEL_DATA_DIR,
   migrateLegacyChannelFiles,
   SYNC_BUF_FILE,
 } from "./channel-config.ts";
+import type { BridgeInputAttachment } from "../bridge/bridge-types.ts";
 
 export const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 
@@ -53,6 +55,40 @@ interface TextItem {
   text?: string;
 }
 
+interface CDNMedia {
+  encrypt_query_param?: string;
+  aes_key?: string;
+  encrypt_type?: number;
+  full_url?: string;
+}
+
+interface ImageItem {
+  media?: CDNMedia;
+  thumb_media?: CDNMedia;
+  aeskey?: string;
+  url?: string;
+  mid_size?: number;
+}
+
+interface VoiceItem {
+  media?: CDNMedia;
+  encode_type?: number;
+  sample_rate?: number;
+  text?: string;
+}
+
+interface FileItem {
+  media?: CDNMedia;
+  file_name?: string;
+  len?: string;
+}
+
+interface VideoItem {
+  media?: CDNMedia;
+  thumb_media?: CDNMedia;
+  video_size?: number;
+}
+
 interface RefMessage {
   message_item?: MessageItem;
   title?: string;
@@ -61,7 +97,10 @@ interface RefMessage {
 interface MessageItem {
   type?: number;
   text_item?: TextItem;
-  voice_item?: { text?: string };
+  image_item?: ImageItem;
+  voice_item?: VoiceItem;
+  file_item?: FileItem;
+  video_item?: VideoItem;
   ref_msg?: RefMessage;
 }
 
@@ -90,6 +129,7 @@ export type InboundWechatMessage = {
   sender: string;
   sessionId: string;
   text: string;
+  attachments: BridgeInputAttachment[];
   contextToken?: string;
   createdAt: string;
   createdAtMs?: number;
@@ -144,6 +184,18 @@ type UploadPreparation = {
   downloadParam: string;
 };
 
+type InboundMediaDownloadKind = UploadLabel;
+
+type InboundMediaDownloadTarget = {
+  kind: InboundMediaDownloadKind;
+  title?: string;
+  sizeBytes?: number;
+  mimeType?: string;
+  media?: CDNMedia;
+  preferredAesKeyHex?: string;
+  directUrl?: string;
+};
+
 export type WechatTransportErrorKind =
   | "timeout"
   | "network"
@@ -169,6 +221,33 @@ const MEDIA_UPLOAD_LIMIT_ENV_KEYS: Record<UploadLabel, string> = {
   file: "WECHAT_MAX_FILE_MB",
   voice: "WECHAT_MAX_VOICE_MB",
   video: "WECHAT_MAX_VIDEO_MB",
+};
+const INBOUND_MEDIA_DIR = path.join(CHANNEL_DATA_DIR, "inbound-media");
+const MEDIA_KIND_DEFAULT_EXTENSIONS: Record<InboundMediaDownloadKind, string> = {
+  image: ".jpg",
+  file: ".bin",
+  voice: ".silk",
+  video: ".mp4",
+};
+const MIME_TYPE_TO_EXTENSION: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "image/bmp": ".bmp",
+  "audio/mpeg": ".mp3",
+  "audio/mp3": ".mp3",
+  "audio/wav": ".wav",
+  "audio/x-wav": ".wav",
+  "audio/ogg": ".ogg",
+  "audio/aac": ".aac",
+  "audio/mp4": ".m4a",
+  "audio/silk": ".silk",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/x-matroska": ".mkv",
+  "video/webm": ".webm",
 };
 
 const RETRYABLE_HTTP_STATUS_CODES = new Set([408, 425, 429]);
@@ -600,6 +679,187 @@ async function uploadBufferToCdn(params: {
   return { downloadParam };
 }
 
+function decodeWechatAesKey(
+  media?: CDNMedia,
+  preferredHex?: string,
+): Buffer | null {
+  if (preferredHex?.trim()) {
+    try {
+      const decoded = Buffer.from(preferredHex.trim(), "hex");
+      if (decoded.length === 16) {
+        return decoded;
+      }
+    } catch {
+      // Fall back to base64.
+    }
+  }
+
+  const encoded = media?.aes_key?.trim();
+  if (!encoded) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(encoded, "base64");
+    if (decoded.length === 16) {
+      return decoded;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function buildCdnDownloadUrl(target: InboundMediaDownloadTarget): string | null {
+  const directUrl = target.directUrl?.trim();
+  if (directUrl && /^https?:\/\//i.test(directUrl)) {
+    return directUrl;
+  }
+
+  const fullUrl = target.media?.full_url?.trim();
+  if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
+    return fullUrl;
+  }
+
+  const encryptedQueryParam = target.media?.encrypt_query_param?.trim();
+  if (!encryptedQueryParam) {
+    return null;
+  }
+
+  return `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(encryptedQueryParam)}`;
+}
+
+function decryptWechatCdnPayload(ciphertext: Buffer, aesKey: Buffer): Buffer {
+  const decipher = createDecipheriv("aes-128-ecb", aesKey, null);
+  decipher.setAutoPadding(true);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function sanitizeFileNameSegment(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function inferAttachmentMimeType(
+  kind: InboundMediaDownloadKind,
+  title?: string,
+  directUrl?: string,
+): string | undefined {
+  const source = title || directUrl || "";
+  const ext = path.extname(source).toLowerCase();
+  switch (ext) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".bmp":
+      return "image/bmp";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".wav":
+      return "audio/wav";
+    case ".ogg":
+      return "audio/ogg";
+    case ".aac":
+      return "audio/aac";
+    case ".m4a":
+      return "audio/mp4";
+    case ".sil":
+    case ".silk":
+      return "audio/silk";
+    case ".mp4":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".mkv":
+      return "video/x-matroska";
+    case ".webm":
+      return "video/webm";
+    default:
+      return kind === "image"
+        ? "image/jpeg"
+        : kind === "voice"
+          ? "audio/silk"
+          : kind === "video"
+            ? "video/mp4"
+            : undefined;
+  }
+}
+
+function inferAttachmentExtension(
+  kind: InboundMediaDownloadKind,
+  title?: string,
+  mimeType?: string,
+  directUrl?: string,
+): string {
+  const titleExtension = path.extname(title || directUrl || "").toLowerCase();
+  if (titleExtension) {
+    return titleExtension;
+  }
+
+  if (mimeType) {
+    const mapped = MIME_TYPE_TO_EXTENSION[mimeType.toLowerCase()];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  return MEDIA_KIND_DEFAULT_EXTENSIONS[kind];
+}
+
+async function downloadInboundMedia(
+  account: AccountData,
+  cacheKey: string,
+  target: InboundMediaDownloadTarget,
+): Promise<BridgeInputAttachment | null> {
+  const downloadUrl = buildCdnDownloadUrl(target);
+  const aesKey = decodeWechatAesKey(target.media, target.preferredAesKeyHex);
+  if (!downloadUrl || !aesKey) {
+    return null;
+  }
+
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(`Inbound media download failed: HTTP ${response.status}`);
+  }
+
+  const ciphertext = Buffer.from(await response.arrayBuffer());
+  const plaintext = decryptWechatCdnPayload(ciphertext, aesKey);
+  const mimeType =
+    target.mimeType ??
+    inferAttachmentMimeType(target.kind, target.title, target.directUrl);
+  const extension = inferAttachmentExtension(
+    target.kind,
+    target.title,
+    mimeType,
+    target.directUrl,
+  );
+  const baseName =
+    sanitizeFileNameSegment(target.title ?? "") ||
+    `${target.kind}-${crypto.createHash("sha1").update(cacheKey).digest("hex").slice(0, 12)}`;
+  const accountDir = path.join(INBOUND_MEDIA_DIR, sanitizeFileNameSegment(account.accountId) || "account");
+  fs.mkdirSync(accountDir, { recursive: true });
+  const filePath = path.join(accountDir, `${baseName}${extension}`);
+  fs.writeFileSync(filePath, plaintext);
+
+  return {
+    kind: target.kind,
+    path: filePath,
+    mimeType,
+    title: target.title,
+    sizeBytes: plaintext.length,
+  };
+}
+
 function extractReferenceLabel(item: MessageItem): string | null {
   const ref = item.ref_msg;
   if (!ref) {
@@ -616,6 +876,67 @@ function extractReferenceLabel(item: MessageItem): string | null {
   }
 
   return parts.length ? `Quoted: ${parts.join(" | ")}` : null;
+}
+
+function extractInboundMediaTargets(message: WeixinMessage): InboundMediaDownloadTarget[] {
+  if (!message.item_list?.length) {
+    return [];
+  }
+
+  const targets: InboundMediaDownloadTarget[] = [];
+  for (const item of message.item_list) {
+    switch (item.type) {
+      case MSG_ITEM_IMAGE:
+        if (item.image_item?.media || item.image_item?.url) {
+          targets.push({
+            kind: "image",
+            title: undefined,
+            sizeBytes: item.image_item?.mid_size,
+            mimeType: inferAttachmentMimeType("image", undefined, item.image_item?.url),
+            media: item.image_item?.media,
+            preferredAesKeyHex: item.image_item?.aeskey,
+            directUrl: item.image_item?.url,
+          });
+        }
+        break;
+      case MSG_ITEM_VOICE:
+        if (item.voice_item?.media) {
+          targets.push({
+            kind: "voice",
+            title: undefined,
+            mimeType: inferAttachmentMimeType("voice"),
+            media: item.voice_item.media,
+          });
+        }
+        break;
+      case MSG_ITEM_FILE:
+        if (item.file_item?.media) {
+          targets.push({
+            kind: "file",
+            title: item.file_item.file_name,
+            sizeBytes: Number(item.file_item.len),
+            mimeType: inferAttachmentMimeType("file", item.file_item.file_name),
+            media: item.file_item.media,
+          });
+        }
+        break;
+      case MSG_ITEM_VIDEO:
+        if (item.video_item?.media) {
+          targets.push({
+            kind: "video",
+            title: undefined,
+            sizeBytes: item.video_item.video_size,
+            mimeType: inferAttachmentMimeType("video"),
+            media: item.video_item.media,
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return targets;
 }
 
 function extractTextFromMessage(message: WeixinMessage): string {
@@ -844,16 +1165,36 @@ export class WeChatTransport {
         continue;
       }
 
-      const text = extractTextFromMessage(rawMessage);
-      if (!text) {
-        continue;
-      }
-
       const messageKey = buildMessageKey(rawMessage);
       if (!this.rememberMessage(messageKey)) {
         continue;
       }
       if (!tryClaimInboundMessage(buildScopedMessageClaimKey(account.accountId, messageKey))) {
+        continue;
+      }
+
+      const text = extractTextFromMessage(rawMessage);
+      const attachmentTargets = extractInboundMediaTargets(rawMessage);
+      const attachments: BridgeInputAttachment[] = [];
+      for (let index = 0; index < attachmentTargets.length; index += 1) {
+        const target = attachmentTargets[index];
+        try {
+          const downloaded = await downloadInboundMedia(
+            account,
+            `${messageKey}|${index}`,
+            target,
+          );
+          if (downloaded) {
+            attachments.push(downloaded);
+          }
+        } catch (error) {
+          this.logger.logError(
+            `Failed to download inbound ${target.kind}: ${describeWechatTransportError(error)}`,
+          );
+        }
+      }
+
+      if (!text && attachments.length === 0) {
         continue;
       }
 
@@ -876,6 +1217,7 @@ export class WeChatTransport {
         sender: normalizeSender(senderId),
         sessionId: rawMessage.session_id ?? "",
         text,
+        attachments,
         contextToken: rawMessage.context_token,
         createdAt: formatTimestamp(rawMessage.create_time_ms),
         createdAtMs,
