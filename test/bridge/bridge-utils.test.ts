@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+﻿import { describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 
@@ -173,12 +173,13 @@ describe("detectCliApproval", () => {
 
 describe("wechat inbound prompt injection", () => {
   test("injects attachment guidance for explicit send-to-WeChat requests", () => {
-    const prompt = buildWechatInboundPrompt("把桌面的pdf发给我，发送微信");
+    const prompt = buildWechatInboundPrompt("把桌面的 pdf 发给我，发送微信");
 
-    expect(shouldInjectWechatAttachmentPrompt("把桌面的pdf发给我，发送微信")).toBe(true);
+    expect(shouldInjectWechatAttachmentPrompt("把桌面的 pdf 发给我，发送微信")).toBe(true);
     expect(prompt).toContain("[WeChat bridge note]");
+    expect(prompt).toContain("multimodal input and output");
     expect(prompt).toContain("```wechat-attachments");
-    expect(prompt).toContain("[User request]\n把桌面的pdf发给我，发送微信");
+    expect(prompt).toContain("[User request]\n\n把桌面的 pdf 发给我，发送微信");
   });
 
   test("injects attachment guidance for short follow-up send commands", () => {
@@ -186,18 +187,25 @@ describe("wechat inbound prompt injection", () => {
     expect(buildWechatInboundPrompt("直接发给我")).toContain("```wechat-attachments");
   });
 
-  test("skips prompt injection for ordinary non-send requests and existing protocol blocks", () => {
+  test("still injects the base capability note for ordinary non-send requests", () => {
     const ordinary = "帮我总结一下这份强化学习资料。";
-    const explicitProtocol = [
-      "直接发送。",
-      "```wechat-attachments",
-      "file C:\\Users\\unlin\\Desktop\\rl.pdf",
-      "```",
-    ].join("\n");
 
     expect(shouldInjectWechatAttachmentPrompt(ordinary)).toBe(false);
-    expect(buildWechatInboundPrompt(ordinary)).toBe(ordinary);
-    expect(buildWechatInboundPrompt(explicitProtocol)).toBe(explicitProtocol);
+    expect(buildWechatInboundPrompt(ordinary)).toContain("[WeChat bridge note]");
+    expect(buildWechatInboundPrompt(ordinary)).toContain("[User request]");
+    expect(buildWechatInboundPrompt(ordinary)).not.toContain("Put any brief visible reply text first");
+  });
+
+  test("does not duplicate the bridge note when it is already present", () => {
+    const explicitPrompt = [
+      "[WeChat bridge note]",
+      "Existing bridge context.",
+      "",
+      "[User request]",
+      "hello",
+    ].join("\n");
+
+    expect(buildWechatInboundPrompt(explicitPrompt)).toBe(explicitPrompt);
   });
 });
 

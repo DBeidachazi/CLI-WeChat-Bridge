@@ -265,10 +265,16 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 链接到统一的：
 
 ```text
-.linkai/skills
+.aiskill/skills
 ```
 
-这样不同 CLI 的 skills 可以共用。
+并兼容旧路径：
+
+```text
+.linkai/skills -> .aiskill/skills
+```
+
+这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
 
 ## 配置
 

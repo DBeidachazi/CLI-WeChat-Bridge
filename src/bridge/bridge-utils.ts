@@ -40,19 +40,24 @@ const WECHAT_ATTACHMENT_FILE_TERM_ZH_RE =
   /文件|附件|文档|压缩包|图片|照片|截图|音频|语音|视频|pdf|PDF/;
 const LOCAL_ATTACHMENT_PATH_HINT_RE =
   /(?:[A-Za-z]:\\|(?:~[\\/])?(?:Desktop|Documents|Downloads|Pictures|Videos|Music)[\\/])/i;
-const WECHAT_ATTACHMENT_PROMPT_PREFIX = [
+const WECHAT_MULTIMODAL_PROMPT_PREFIX = [
   "[WeChat bridge note]",
+  "You are connected through a WeChat bridge with multimodal input and output.",
+  "Inbound voice messages may already be transcribed into text before they reach you.",
+  "If the prompt includes local images or media attachments, inspect them directly instead of claiming that you cannot receive multimodal input.",
   "Your final reply will be forwarded back to a WeChat chat.",
-  "If the user asks you to send a local file or media to WeChat and you know the local path, do not say that you lack a WeChat sending tool.",
-  "For a real send request, prefer locating and sending the file directly instead of opening or reading it unless the user explicitly asked for that.",
-  "Put any brief visible reply text first, then end the message with exactly one trailing block like:",
+  "You can send local files or media back to WeChat by ending the final reply with exactly one trailing block like:",
   "```wechat-attachments",
-  "file C:\\Users\\name\\Desktop\\document.pdf",
+  "image C:\\Users\\name\\Desktop\\photo.png",
   "```",
   "Valid kinds: image, file, video, voice.",
+].join("\n");
+
+const WECHAT_ATTACHMENT_PROMPT_SUFFIX = [
+  "If the user asks you to send a local file or media to WeChat and you know the local path, do not say that you lack a WeChat sending tool.",
+  "For a real send request, prefer locating and sending the file directly instead of opening or reading it unless the user explicitly asked for that.",
+  "Put any brief visible reply text first, then end the message with the trailing attachment block.",
   "Use `file` for PDFs and ordinary documents. Only include files you truly intend to upload.",
-  "",
-  "[User request]",
 ].join("\n");
 
 const WECHAT_ATTACHMENT_BLOCK_RE =
@@ -295,16 +300,22 @@ export function shouldInjectWechatAttachmentPrompt(text: string): boolean {
 }
 
 export function buildWechatInboundPrompt(text: string): string {
-  if (!shouldInjectWechatAttachmentPrompt(text)) {
-    return text;
-  }
-
   const normalized = normalizeOutput(text).trim();
   if (!normalized) {
     return text;
   }
 
-  return `${WECHAT_ATTACHMENT_PROMPT_PREFIX}\n${normalized}`;
+  if (normalized.includes("[WeChat bridge note]")) {
+    return text;
+  }
+
+  const sections = [WECHAT_MULTIMODAL_PROMPT_PREFIX];
+  if (shouldInjectWechatAttachmentPrompt(normalized)) {
+    sections.push(WECHAT_ATTACHMENT_PROMPT_SUFFIX);
+  }
+  sections.push("[User request]");
+  sections.push(normalized);
+  return sections.join("\n\n");
 }
 
 export function parseWechatFinalReply(text: string): ParsedWechatFinalReply {

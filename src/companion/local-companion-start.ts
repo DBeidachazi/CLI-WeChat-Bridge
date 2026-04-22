@@ -44,11 +44,39 @@ type EndpointReadResult = {
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_ADAPTER: LocalCompanionLaunchAdapter = "codex";
+const SHARED_SKILLS_ROOT = ".aiskill";
+const SHARED_SKILLS_DIRNAME = "skills";
+const LEGACY_SHARED_SKILLS_ROOT = ".linkai";
 const SKILL_LINK_TARGETS = [
   ".codex/skills",
   ".gemini/skills",
   ".copilot/skills",
 ] as const;
+const WECHAT_MULTIMODAL_SKILL_NAME = "wechat-bridge-multimodal";
+const WECHAT_MULTIMODAL_SKILL_CONTENT = `# WeChat Bridge Multimodal
+
+You are running behind CLI-WeChat-Bridge.
+
+Rules:
+- Treat WeChat as a multimodal channel.
+- Incoming voice messages may already be transcribed into plain text.
+- Incoming local images or media attachments, when present, are real user inputs and should be inspected directly.
+- Do not claim that you cannot receive images if the runtime already provided local image inputs.
+- When the user asks you to send local files or media back to WeChat, end the final reply with exactly one trailing \`wechat-attachments\` block.
+
+Protocol:
+\`\`\`wechat-attachments
+image C:\\Users\\name\\Desktop\\photo.png
+file C:\\Users\\name\\Desktop\\report.pdf
+voice C:\\Users\\name\\Desktop\\reply.m4a
+video C:\\Users\\name\\Desktop\\clip.mp4
+\`\`\`
+
+Notes:
+- Put normal visible reply text before the attachment block.
+- Use only absolute local paths unless the runtime explicitly accepts home-relative desktop paths.
+- Include only files you really want to send.
+`;
 
 function log(adapter: LocalCompanionLaunchAdapter, message: string): void {
   process.stderr.write(`[wechat-${adapter}-start] ${message}\n`);
@@ -323,9 +351,60 @@ function doesTmuxSessionExist(sessionName: string): boolean {
   return tmuxCommand(["has-session", "-t", sessionName]) === 0;
 }
 
+function ensureSharedWechatSkill(sharedSkillsDir: string): void {
+  const skillDir = path.join(sharedSkillsDir, WECHAT_MULTIMODAL_SKILL_NAME);
+  const skillFile = path.join(skillDir, "SKILL.md");
+  fs.mkdirSync(skillDir, { recursive: true });
+  if (!fs.existsSync(skillFile)) {
+    fs.writeFileSync(skillFile, WECHAT_MULTIMODAL_SKILL_CONTENT, "utf8");
+  }
+}
+
+function ensureSharedSkillAlias(
+  cwd: string,
+  adapter: LocalCompanionLaunchAdapter,
+  sharedSkillsDir: string,
+): void {
+  const aliasPath = path.join(cwd, LEGACY_SHARED_SKILLS_ROOT, SHARED_SKILLS_DIRNAME);
+  fs.mkdirSync(path.dirname(aliasPath), { recursive: true });
+
+  try {
+    const stat = fs.lstatSync(aliasPath);
+    if (stat.isSymbolicLink()) {
+      const target = path.resolve(path.dirname(aliasPath), fs.readlinkSync(aliasPath));
+      if (target === sharedSkillsDir) {
+        return;
+      }
+    } else if (stat.isDirectory()) {
+      log(
+        adapter,
+        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a real directory already exists.`,
+      );
+      return;
+    } else {
+      log(
+        adapter,
+        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a non-directory path already exists.`,
+      );
+      return;
+    }
+  } catch {
+    // Alias path does not exist yet.
+  }
+
+  try {
+    fs.rmSync(aliasPath, { recursive: true, force: true });
+  } catch {
+    // Best effort cleanup.
+  }
+  fs.symlinkSync(path.relative(path.dirname(aliasPath), sharedSkillsDir), aliasPath, "dir");
+}
+
 function ensureSkillSyncLinks(cwd: string, adapter: LocalCompanionLaunchAdapter): void {
-  const sharedSkillsDir = path.join(cwd, ".linkai", "skills");
+  const sharedSkillsDir = path.join(cwd, SHARED_SKILLS_ROOT, SHARED_SKILLS_DIRNAME);
   fs.mkdirSync(sharedSkillsDir, { recursive: true });
+  ensureSharedWechatSkill(sharedSkillsDir);
+  ensureSharedSkillAlias(cwd, adapter, sharedSkillsDir);
 
   for (const relativeTarget of SKILL_LINK_TARGETS) {
     const linkPath = path.join(cwd, relativeTarget);

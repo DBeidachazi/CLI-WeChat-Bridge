@@ -32,10 +32,19 @@
 - Wired detached replacement-bridge stdout/stderr back into container stdout/stderr, so Gemini/Copilot replacement sessions now emit startup/transcript logs to `docker logs` as well.
 - Expanded `.gitignore` / `.dockerignore` to keep local auth, runtime state, `home/`, skills links, and editor files out of Git and Docker build context.
 - Added a GitHub Actions workflow that builds and pushes the Docker image to DockerHub on `main`, tags, or manual dispatch.
+- Upgraded the shared skills root from `.linkai/skills` to `.aiskill/skills`, while keeping `.linkai/skills -> .aiskill/skills` as a backward-compatible alias.
+- Added automatic generation of a shared `wechat-bridge-multimodal` skill so Codex, Gemini, and Copilot can discover WeChat multimodal input/output conventions from the shared skills directory.
+- Updated inbound WeChat prompt construction so the first turn now explicitly tells the model that the bridge supports multimodal WeChat input/output, voice transcripts, and `wechat-attachments` media replies.
+- Updated README and prompt-oriented tests to match the new shared skill layout and first-turn multimodal capability note.
 
 ## In Progress
 
 - Cleaning up remaining TypeScript/test drift that already existed in the repo alongside the new ACP changes.
+- Extending inbound WeChat multimodal ingestion beyond text and voice transcript:
+  - download/decrypt inbound WeChat images and media to local files
+  - attach those files to ACP prompts for Gemini/Copilot on the first turn
+  - keep non-ACP adapters compatible while that path is introduced incrementally
+- Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
 
 ## Notes
 
@@ -43,3 +52,4 @@
 - Copilot ACP probing succeeded and returned live mode/model/config metadata plus a real prompt response.
 - Rebuilt the Docker image and verified inside the live container that `/app/node_modules/node-pty/build/Release/pty.node` exists and `require("node-pty")` succeeds.
 - The repo still has pre-existing strict TypeScript issues outside this change set, so validation is being done incrementally with runnable entrypoints and targeted checks.
+- On the current Windows host, `bun` is not installed, so Bun-based tests could not be executed locally in this pass; validation was limited to diff sanity checks and file-level review.
