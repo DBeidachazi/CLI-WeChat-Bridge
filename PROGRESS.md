@@ -51,6 +51,7 @@
 - Reverted the two CRLF-polluted history entries (`781e9acbd00e9471af676a2c1e902bbb8880150e` and `5a57671c8449c16f00245fa4e0ef72fc9186815c`) with dedicated revert commits, then removed `.gitattributes` so line-ending policy is no longer enforced from the repo root.
 - Updated the Docker image build to copy repository guidance files and tracked hidden overlay directories into `/app` so container-only workflows can inspect the same docs as the source checkout.
 - Updated the tracked hidden-directory overlay and container bootstrap so shared `.linkai` guidance files are linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
+- Added `scripts/multi-link-service.cjs` plus startup-time symlink probing so Docker deployments on filesystems like `exfat` now keep `.linkai` docs and `skills` continuously synchronized into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` instead of failing on unsupported symlinks or settling for one-shot copies.
 
 ## In Progress
 

@@ -293,6 +293,8 @@ Docker 容器启动后，同一套链接会同步到：
 
 同步只会补共享文档和 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。
 
+如果容器的 `/root` 挂载在不支持符号链接的文件系统上，例如 `exfat`，启动时会自动拉起 `scripts/multi-link-service.cjs`。这个基于 `chokidar` 的常驻同步服务会持续把 `.linkai` 与 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot` 之间的共享文档和 `skills` 做多向同步，用文件同步来模拟 link 效果，而不是一次性复制后就失联。
+
 ## 配置
 
 项目会自动读取仓库根目录下的 `.env`。

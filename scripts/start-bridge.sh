@@ -10,6 +10,45 @@ cd "${PROJECT_DIR}"
 
 CREDENTIALS_FILE="${HOME}/.claude/channels/wechat/account.json"
 BRIDGE_LOCK_FILE="${HOME}/.claude/channels/wechat/bridge.lock.json"
+MULTI_LINK_SERVICE_PID=""
+MULTI_LINK_SERVICE_LOG_TARGET="/proc/1/fd/2"
+
+supports_symlinks_in_home_overlay() {
+  local probe_dir="${HOME}/.claude/channels/wechat"
+  local probe_target="${probe_dir}/.symlink-probe-target-$$"
+  local probe_link="${probe_dir}/.symlink-probe-link-$$"
+
+  mkdir -p "${probe_dir}"
+  printf 'probe\n' > "${probe_target}"
+  if ln -s "${probe_target}" "${probe_link}" 2>/dev/null; then
+    rm -f "${probe_link}" "${probe_target}"
+    return 0
+  fi
+
+  rm -f "${probe_link}" "${probe_target}" 2>/dev/null || true
+  return 1
+}
+
+start_multi_link_service_if_needed() {
+  if supports_symlinks_in_home_overlay; then
+    return 0
+  fi
+
+  echo "[startup] detected filesystem without symlink support under ${HOME}; starting multi-link sync service"
+  node ./scripts/multi-link-service.cjs \
+    --shared-root "${PROJECT_DIR}/.linkai" \
+    --target-roots "${HOME}/.claude:${HOME}/.codex:${HOME}/.gemini:${HOME}/.copilot" \
+    >> "${MULTI_LINK_SERVICE_LOG_TARGET}" 2>&1 &
+  MULTI_LINK_SERVICE_PID=$!
+}
+
+stop_multi_link_service() {
+  if [[ -n "${MULTI_LINK_SERVICE_PID}" ]] && kill -0 "${MULTI_LINK_SERVICE_PID}" 2>/dev/null; then
+    kill "${MULTI_LINK_SERVICE_PID}" 2>/dev/null || true
+    wait "${MULTI_LINK_SERVICE_PID}" 2>/dev/null || true
+  fi
+}
+
 if [[ ! -f "${CREDENTIALS_FILE}" ]]; then
   if [[ "${WECHAT_BRIDGE_AUTO_WECHAT_SETUP:-true}" == "true" ]]; then
     echo "[startup] no WeChat credentials found at ${CREDENTIALS_FILE}"
@@ -114,11 +153,14 @@ terminate_managed_bridge() {
 }
 
 on_exit() {
+  stop_multi_link_service
   terminate_managed_bridge
 }
 
 trap on_exit EXIT
 trap 'exit 0' INT TERM
+
+start_multi_link_service_if_needed
 
 start_managed_bridge() {
   local adapter="${1:-codex}"
