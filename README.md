@@ -277,6 +277,8 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
 
+共享 skills 必须使用文件夹结构，例如 `.linkai/skills/video-download/SKILL.md`。视频下载 skill 默认把文件保存到 `~/meidia`，并通过本项目的 `wechat-attachments` 代码块发送，不使用 OpenClaw 的 `MEDIA:` 协议。
+
 为了避免 Gemini / Claude / Copilot 在项目目录里重复读到多份同名指令文件，`.linkai` 里的共享文档源文件只保留一份：
 
 - `.linkai/AGENT.shared.md`

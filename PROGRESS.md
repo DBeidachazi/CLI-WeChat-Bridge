@@ -54,6 +54,7 @@
 - Reduced provider-context duplication by keeping only `.linkai/AGENT.shared.md` as the canonical source, mapping it to a single provider-specific target file per CLI, and removing stale extra shared doc targets.
 - Added LinkAI document version detection so `.linkai/config/markdown.xml` can advance `AGENT.shared.md` from the implicit initial `1.0.0` by appending missing version patch files from `.linkai/config`.
 - Updated the Docker runtime so `/app` stays application source only, provider-readable guidance files are no longer copied there, managed plus `wechat-*-start` bridges default their AI workspace to `/root`, and shared docs still project from `/app/.linkai` via `WECHAT_BRIDGE_SHARED_ROOT`.
+- Added a shared `video-download` skill for CLI-WeChat-Bridge that stores downloads in `~/meidia` and sends them through `wechat-attachments` instead of OpenClaw's `MEDIA:` protocol.
 
 ## In Progress
 
