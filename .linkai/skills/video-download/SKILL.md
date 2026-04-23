@@ -9,8 +9,6 @@ Use this skill when the user wants a remote video downloaded and sent back throu
 
 ## Bridge-Specific Rule
 
-This project does not use OpenClaw's `MEDIA:<path>` protocol.
-
 For CLI-WeChat-Bridge, the final reply must end with a `wechat-attachments` block:
 
 ```wechat-attachments
