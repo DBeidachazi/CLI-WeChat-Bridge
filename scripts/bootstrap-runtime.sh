@@ -16,6 +16,8 @@ sync_shared_ai_overlay() {
   local source_path=""
   local dest_path=""
   local skills_dir=""
+  local doc_source=""
+  local doc_target=""
 
   if [[ ! -d "${shared_root}" ]]; then
     return
@@ -59,25 +61,28 @@ sync_shared_ai_overlay() {
   for target_root in "${HOME}/.claude" "${HOME}/.codex" "${HOME}/.gemini" "${HOME}/.copilot"; do
     mkdir -p "${target_root}"
 
-    shopt -s nullglob
-    for entry in "${shared_root}"/*; do
-      entry_name="$(basename "${entry}")"
-      if [[ "${entry_name}" == "skills" ]]; then
-        continue
-      fi
+    for doc_source in AGENT.shared.md CLAUDE.shared.md GEMINI.shared.md; do
+      source_path="${shared_root}/${doc_source}"
+      [[ -f "${source_path}" ]] || continue
 
-      dest_path="${target_root}/${entry_name}"
-      source_path="${entry}"
+      case "${doc_source}" in
+        AGENT.shared.md) doc_target="AGENT.md" ;;
+        CLAUDE.shared.md) doc_target="CLAUDE.md" ;;
+        GEMINI.shared.md) doc_target="GEMINI.md" ;;
+        *) continue ;;
+      esac
+
+      dest_path="${target_root}/${doc_target}"
       link_or_copy_entry "${source_path}" "${dest_path}"
     done
 
     skills_dir="${target_root}/skills"
     if [[ -e "${skills_dir}" && ! -d "${skills_dir}" ]]; then
-      shopt -u nullglob
       continue
     fi
     mkdir -p "${skills_dir}"
 
+    shopt -s nullglob
     for entry in "${shared_root}/skills"/*; do
       entry_name="$(basename "${entry}")"
       dest_path="${skills_dir}/${entry_name}"

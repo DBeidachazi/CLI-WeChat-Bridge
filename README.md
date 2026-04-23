@@ -277,6 +277,19 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
 
+为了避免 Gemini / Claude / Copilot 在项目目录里重复读到多份同名指令文件，`.linkai` 里的共享文档源文件使用：
+
+- `.linkai/AGENT.shared.md`
+- `.linkai/CLAUDE.shared.md`
+- `.linkai/GEMINI.shared.md`
+
+同步到各 provider 家目录时，才会映射成它们真正识别的目标文件名，例如 `/root/.gemini/GEMINI.md`。这样模型通常只会读到：
+
+- 项目级 `/app/GEMINI.md`
+- 全局级 `/root/.gemini/GEMINI.md`
+
+而不会再把 `/app/.linkai/GEMINI.md` 这种第三份重复上下文一起吃进去。
+
 共享根目录里的 `AGENT.md`、`GEMINI.md` 和 `skills/*` 也会通过符号链接暴露到：
 
 - `.claude/`

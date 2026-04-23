@@ -52,6 +52,7 @@
 - Updated the Docker image build to copy repository guidance files and tracked hidden overlay directories into `/app` so container-only workflows can inspect the same docs as the source checkout.
 - Updated the tracked hidden-directory overlay and container bootstrap so shared `.linkai` guidance files are linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
 - Added `scripts/multi-link-service.cjs` plus startup-time symlink probing so Docker deployments on filesystems like `exfat` now keep `.linkai` docs and `skills` continuously synchronized into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` instead of failing on unsupported symlinks or settling for one-shot copies.
+- Reduced provider-context duplication by renaming shared `.linkai` guidance sources to non-reserved `*.shared.md` filenames, keeping only the target home-directory projections (`/root/.gemini/GEMINI.md`, etc.) as provider-visible memory files while leaving `/app/GEMINI.md` as the single project-level copy.
 
 ## In Progress
 

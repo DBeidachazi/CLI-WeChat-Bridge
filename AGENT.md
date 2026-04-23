@@ -33,6 +33,7 @@ This repository bridges WeChat messages into local CLI agents such as Codex, Cla
 - Backward compatibility is kept through `.aiskill/skills -> .linkai/skills`.
 - The launcher links `.claude/skills`, `.codex/skills`, `.gemini/skills`, and `.copilot/skills` into the shared skills directory.
 - The launcher also ensures a generated `wechat-bridge-multimodal` skill exists so supported agents can discover WeChat multimodal input/output behavior on the first turn.
+- Shared provider guidance sources under `.linkai` use non-reserved filenames such as `GEMINI.shared.md`, then map into provider-specific targets like `/root/.gemini/GEMINI.md` during sync so the model does not waste context by auto-loading duplicate project-side copies.
 - When the Docker home volume is mounted on a filesystem without symlink support, startup falls back to a multi-link sync service so the shared `.linkai` docs and skills stay synchronized into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` without clobbering provider-owned state.
 
 ## Working Rules

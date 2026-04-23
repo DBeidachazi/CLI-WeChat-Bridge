@@ -26,7 +26,11 @@ const targetRoots = readOption("--target-roots", "")
   .map((entry) => path.resolve(entry));
 const once = hasFlag("--once");
 
-const DOC_FILENAMES = ["AGENT.md", "CLAUDE.md", "GEMINI.md"];
+const DOC_MAPPINGS = [
+  { sourceName: "AGENT.shared.md", targetName: "AGENT.md" },
+  { sourceName: "CLAUDE.shared.md", targetName: "CLAUDE.md" },
+  { sourceName: "GEMINI.shared.md", targetName: "GEMINI.md" },
+];
 const SKILLS_DIRNAME = "skills";
 const cooldownMs = 500;
 let isSyncing = false;
@@ -47,8 +51,8 @@ function scheduleUnlock() {
 }
 
 function buildDocGroups() {
-  return DOC_FILENAMES.map((filename) =>
-    [path.join(sharedRoot, filename), ...targetRoots.map((root) => path.join(root, filename))].map((entry) =>
+  return DOC_MAPPINGS.map(({ sourceName, targetName }) =>
+    [path.join(sharedRoot, sourceName), ...targetRoots.map((root) => path.join(root, targetName))].map((entry) =>
       path.resolve(entry),
     ),
   );
