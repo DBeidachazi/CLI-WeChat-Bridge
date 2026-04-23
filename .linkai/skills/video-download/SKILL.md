@@ -36,6 +36,8 @@ helper="$(find "$HOME" -path '*/skills/video-download/scripts/download-video.sh'
 "$helper" "https://example.com/video"
 ```
 
+The helper runs `yt-dlp` directly. If `yt-dlp` is missing, it installs `yt-dlp-dl` globally with npm, downloads the `yt-dlp` binary into `~/.local/bin`, and retries.
+
 If running manually, use this pattern:
 
 ```bash
@@ -58,5 +60,5 @@ video /absolute/path/to/downloaded.mp4
 
 - In Docker, `$HOME` is normally `/root`, so `~/meidia` becomes `/root/meidia`.
 - Use `.mp4` when possible because WeChat video upload is most reliable with MP4.
-- If `yt-dlp` is not installed, install or locate it first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
+- If `yt-dlp` is not installed, install it first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
 - If the file is too large for WeChat, try a lower format or transcode/compress before sending.
