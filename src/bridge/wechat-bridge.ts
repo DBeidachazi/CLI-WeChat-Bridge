@@ -31,6 +31,8 @@ import type {
   BridgeAdapter,
   BridgeAdapterKind,
   BridgeEvent,
+  BridgeInputAttachment,
+  BridgeUserInput,
   BridgeLifecycleMode,
   BridgeTurnOrigin,
   BridgeWorkerStatus,
@@ -72,6 +74,10 @@ type WechatModelSwitchTarget = BridgeAdapterKind;
 
 type DeferredInboundMessage = {
   message: InboundWechatMessage;
+};
+
+type WechatAdapterInputOptions = {
+  passthroughSlashCommand?: boolean;
 };
 
 type WechatSendContext =
@@ -121,6 +127,19 @@ export function formatBridgeAttachmentLogEntry(params: {
   filePath: string;
 }): string {
   return `[transcript] cli->wechat attachment recipient=${params.recipientId} kind=${params.kind} path=${params.filePath}`;
+}
+
+export function buildAdapterInputFromWechatMessage(
+  message: Pick<InboundWechatMessage, "text" | "attachments">,
+  options: WechatAdapterInputOptions = {}
+): BridgeUserInput {
+  const attachments = message.attachments as BridgeInputAttachment[];
+  return {
+    text: options.passthroughSlashCommand
+      ? message.text
+      : buildWechatInboundPromptWithAttachments(message.text, attachments),
+    attachments,
+  };
 }
 
 function logBridgeTranscript(
@@ -1392,6 +1411,9 @@ async function handleInboundMessage(params: {
         options,
         stateStore,
         adapter,
+        adapterInputOptions: {
+          passthroughSlashCommand: true,
+        },
       });
     case "status":
       await queueWechatMessage(
@@ -1573,11 +1595,12 @@ async function dispatchInboundWechatText(params: {
   options: BridgeCliOptions;
   stateStore: BridgeStateStore;
   adapter: BridgeAdapter;
+  adapterInputOptions?: WechatAdapterInputOptions;
 }): Promise<ActiveTask> {
-  const { message, options, stateStore, adapter } = params;
-  const promptText = buildWechatInboundPromptWithAttachments(
-    message.text,
-    message.attachments
+  const { message, options, stateStore, adapter, adapterInputOptions } = params;
+  const adapterInput = buildAdapterInputFromWechatMessage(
+    message,
+    adapterInputOptions
   );
   const previewSource =
     message.text.trim() ||
@@ -1591,10 +1614,7 @@ async function dispatchInboundWechatText(params: {
   stateStore.appendLog(
     `Forwarded input to ${options.adapter}: ${truncatePreview(previewSource)}`
   );
-  await adapter.sendInput({
-    text: promptText,
-    attachments: message.attachments,
-  });
+  await adapter.sendInput(adapterInput);
   return activeTask;
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildAdapterInputFromWechatMessage,
   canDrainDeferredCodexInboundQueue,
   formatBridgeAttachmentLogEntry,
   formatBridgeTranscriptLogEntry,
@@ -103,6 +104,34 @@ describe("wechat-bridge cli helpers", () => {
     ).toBe(
       "[transcript] cli->wechat attachment recipient=owner@im.wechat kind=file path=/tmp/result.txt"
     );
+  });
+
+  test("buildAdapterInputFromWechatMessage preserves raw slash commands for ai passthrough", () => {
+    expect(
+      buildAdapterInputFromWechatMessage(
+        {
+          text: "/memory show",
+          attachments: [],
+        },
+        {
+          passthroughSlashCommand: true,
+        }
+      )
+    ).toEqual({
+      text: "/memory show",
+      attachments: [],
+    });
+  });
+
+  test("buildAdapterInputFromWechatMessage still wraps normal WeChat text", () => {
+    const input = buildAdapterInputFromWechatMessage({
+      text: "hello",
+      attachments: [],
+    });
+
+    expect(input.attachments).toEqual([]);
+    expect(input.text).toContain("[User request]");
+    expect(input.text).toContain("hello");
   });
 
   test("formats opencode companion disconnects as a cleaner user-facing message", () => {
