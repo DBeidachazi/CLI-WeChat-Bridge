@@ -21,6 +21,41 @@ sync_shared_ai_overlay() {
     return
   fi
 
+  copy_entry_if_needed() {
+    local source_path="${1}"
+    local dest_path="${2}"
+
+    if [[ -e "${dest_path}" || -L "${dest_path}" ]]; then
+      return 0
+    fi
+
+    if [[ -d "${source_path}" ]]; then
+      cp -R "${source_path}" "${dest_path}"
+    else
+      cp "${source_path}" "${dest_path}"
+    fi
+  }
+
+  link_or_copy_entry() {
+    local source_path="${1}"
+    local dest_path="${2}"
+
+    if [[ -L "${dest_path}" ]]; then
+      if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
+        return 0
+      fi
+      rm -f "${dest_path}" 2>/dev/null || true
+    elif [[ -e "${dest_path}" ]]; then
+      return 0
+    fi
+
+    if ln -s "${source_path}" "${dest_path}" 2>/dev/null; then
+      return 0
+    fi
+
+    copy_entry_if_needed "${source_path}" "${dest_path}"
+  }
+
   for target_root in "${HOME}/.claude" "${HOME}/.codex" "${HOME}/.gemini" "${HOME}/.copilot"; do
     mkdir -p "${target_root}"
 
@@ -33,16 +68,7 @@ sync_shared_ai_overlay() {
 
       dest_path="${target_root}/${entry_name}"
       source_path="${entry}"
-      if [[ -L "${dest_path}" ]]; then
-        if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
-          continue
-        fi
-        rm -f "${dest_path}"
-      elif [[ -e "${dest_path}" ]]; then
-        continue
-      fi
-
-      ln -s "${source_path}" "${dest_path}"
+      link_or_copy_entry "${source_path}" "${dest_path}"
     done
 
     skills_dir="${target_root}/skills"
@@ -56,17 +82,7 @@ sync_shared_ai_overlay() {
       entry_name="$(basename "${entry}")"
       dest_path="${skills_dir}/${entry_name}"
       source_path="${entry}"
-
-      if [[ -L "${dest_path}" ]]; then
-        if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
-          continue
-        fi
-        rm -f "${dest_path}"
-      elif [[ -e "${dest_path}" ]]; then
-        continue
-      fi
-
-      ln -s "${source_path}" "${dest_path}"
+      link_or_copy_entry "${source_path}" "${dest_path}"
     done
     shopt -u nullglob
   done
