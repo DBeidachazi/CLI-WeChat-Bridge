@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const token = process.env.CLAUDE_WECHAT_HOOK_TOKEN;
   const port = portText ? Number.parseInt(portText, 10) : Number.NaN;
 
-  if (!token || !Number.isInteger(port) || port <= 0) {
+  if (!(token && Number.isInteger(port)) || port <= 0) {
     return;
   }
 
@@ -70,7 +70,10 @@ async function main(): Promise<void> {
             requestId?: string;
             stdout?: string;
           };
-          if (response.requestId === requestId && typeof response.stdout === "string") {
+          if (
+            response.requestId === requestId &&
+            typeof response.stdout === "string"
+          ) {
             stdout = response.stdout;
           }
         } catch {

@@ -2,20 +2,17 @@
 
 import net from "node:net";
 import path from "node:path";
-
+import { LOCAL_COMPANION_RECONNECT_GRACE_MS } from "../bridge/bridge-adapters.shared.ts";
 import { createBridgeAdapter } from "../bridge/bridge-adapters.ts";
-import {
-  LOCAL_COMPANION_RECONNECT_GRACE_MS,
-} from "../bridge/bridge-adapters.shared.ts";
+import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 import {
   attachLocalCompanionMessageListener,
-  readLocalCompanionEndpoint,
-  sendLocalCompanionMessage,
   type LocalCompanionCloseReason,
   type LocalCompanionEndpoint,
   type LocalCompanionMessage,
+  readLocalCompanionEndpoint,
+  sendLocalCompanionMessage,
 } from "./local-companion-link.ts";
-import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 
 export const LOCAL_COMPANION_RECONNECT_RETRY_MS = 250;
 
@@ -41,15 +38,20 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
         [
           "Usage: local-companion --adapter <codex|claude|opencode|gemini|copilot> [--cwd <path>]",
           "",
-          'Starts the visible local companion and connects it to the matching running bridge for the current directory.',
+          "Starts the visible local companion and connects it to the matching running bridge for the current directory.",
           "",
-        ].join("\n"),
+        ].join("\n")
       );
       process.exit(0);
     }
 
     if (arg === "--adapter") {
-      if (!next || !["codex", "claude", "opencode", "gemini", "copilot"].includes(next)) {
+      if (
+        !(
+          next &&
+          ["codex", "claude", "opencode", "gemini", "copilot"].includes(next)
+        )
+      ) {
         throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
       }
       adapter = next as LocalCompanionCliOptions["adapter"];
@@ -70,7 +72,9 @@ function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
   }
 
   if (!adapter) {
-    throw new Error("Missing required --adapter <codex|claude|opencode|gemini|copilot>");
+    throw new Error(
+      "Missing required --adapter <codex|claude|opencode|gemini|copilot>"
+    );
   }
 
   return { adapter, cwd };
@@ -84,12 +88,12 @@ function delay(ms: number): Promise<void> {
 }
 
 function readMatchingEndpoint(
-  options: LocalCompanionCliOptions,
+  options: LocalCompanionCliOptions
 ): LocalCompanionEndpoint {
   const endpoint = readLocalCompanionEndpoint(options.cwd);
   if (!endpoint || endpoint.kind !== options.adapter) {
     throw new Error(
-      `No active ${options.adapter} bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-${options.adapter}" in that directory first.`,
+      `No active ${options.adapter} bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-${options.adapter}" in that directory first.`
     );
   }
 
@@ -100,7 +104,7 @@ export function shouldReconnectLocalCompanion(params: {
   shuttingDown: boolean;
   closeReason: LocalCompanionCloseReason | null | undefined;
 }): boolean {
-  return !params.shuttingDown && !params.closeReason;
+  return !(params.shuttingDown || params.closeReason);
 }
 
 async function main(): Promise<void> {
@@ -162,7 +166,7 @@ async function main(): Promise<void> {
     id: string,
     ok: boolean,
     result?: unknown,
-    error?: string,
+    error?: string
   ) => {
     sendLocalCompanionMessage(socket, {
       type: "response",
@@ -175,7 +179,7 @@ async function main(): Promise<void> {
 
   const announceClosing = (
     reason: LocalCompanionCloseReason,
-    exitCode?: number,
+    exitCode?: number
   ) => {
     closeReason = reason;
     if (!activeSocket) {
@@ -190,7 +194,7 @@ async function main(): Promise<void> {
 
   const closeCompanion = async (
     exitCode = 0,
-    reason: LocalCompanionCloseReason = "companion_shutdown",
+    reason: LocalCompanionCloseReason = "companion_shutdown"
   ) => {
     if (shuttingDown) {
       return;
@@ -209,10 +213,10 @@ async function main(): Promise<void> {
 
   const handleBridgeRequest = async (
     socket: net.Socket,
-    message: Extract<LocalCompanionMessage, { type: "request" }>,
+    message: Extract<LocalCompanionMessage, { type: "request" }>
   ) => {
     try {
-        switch (message.payload.command) {
+      switch (message.payload.command) {
         case "send_input":
           await adapter.sendInput(message.payload.input);
           sendResponse(socket, message.id, true);
@@ -223,7 +227,7 @@ async function main(): Promise<void> {
             socket,
             message.id,
             true,
-            await adapter.listResumeSessions(message.payload.limit),
+            await adapter.listResumeSessions(message.payload.limit)
           );
           break;
         case "resume_session":
@@ -249,7 +253,7 @@ async function main(): Promise<void> {
             socket,
             message.id,
             true,
-            await adapter.resolveApproval(message.payload.action),
+            await adapter.resolveApproval(message.payload.action)
           );
           break;
         case "dispose":
@@ -264,7 +268,7 @@ async function main(): Promise<void> {
   };
 
   const connectToBridge = async (
-    endpoint: LocalCompanionEndpoint,
+    endpoint: LocalCompanionEndpoint
   ): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
       const socket = net.connect({
@@ -315,15 +319,15 @@ async function main(): Promise<void> {
             }
 
             void handleBridgeRequest(socket, message);
-          },
+          }
         );
 
         socket.once("close", () => {
           if (!settled) {
             fail(
               new Error(
-                `The ${options.adapter} bridge closed the local companion socket before authentication.`,
-              ),
+                `The ${options.adapter} bridge closed the local companion socket before authentication.`
+              )
             );
             return;
           }
@@ -341,7 +345,7 @@ async function main(): Promise<void> {
               }
 
               const reconnected = await reconnectToBridge();
-              if (!reconnected && !shuttingDown) {
+              if (!(reconnected || shuttingDown)) {
                 await closeCompanion(1, "fatal_error");
               }
             })();
@@ -350,11 +354,7 @@ async function main(): Promise<void> {
 
         socket.once("error", (error) => {
           if (!settled) {
-            fail(
-              error instanceof Error
-                ? error
-                : new Error(String(error)),
-            );
+            fail(error instanceof Error ? error : new Error(String(error)));
           }
         });
 
@@ -383,7 +383,7 @@ async function main(): Promise<void> {
       let lastError = "";
       log(
         options.adapter,
-        `Bridge connection dropped unexpectedly. Waiting up to ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s to reconnect...`,
+        `Bridge connection dropped unexpectedly. Waiting up to ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s to reconnect...`
       );
 
       while (!shuttingDown && Date.now() < deadline) {
@@ -391,7 +391,10 @@ async function main(): Promise<void> {
           const nextEndpoint = readMatchingEndpoint(options);
           await connectToBridge(nextEndpoint);
           publishState();
-          log(options.adapter, `Reconnected to bridge ${nextEndpoint.instanceId}.`);
+          log(
+            options.adapter,
+            `Reconnected to bridge ${nextEndpoint.instanceId}.`
+          );
           return true;
         } catch (error) {
           lastError = error instanceof Error ? error.message : String(error);
@@ -402,12 +405,12 @@ async function main(): Promise<void> {
       if (lastError) {
         log(
           options.adapter,
-          `Bridge reconnection timed out after ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s: ${lastError}`,
+          `Bridge reconnection timed out after ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s: ${lastError}`
         );
       } else {
         log(
           options.adapter,
-          `Bridge reconnection timed out after ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s.`,
+          `Bridge reconnection timed out after ${Math.ceil(LOCAL_COMPANION_RECONNECT_GRACE_MS / 1000)}s.`
         );
       }
       return false;
@@ -457,7 +460,9 @@ async function main(): Promise<void> {
   log(options.adapter, `Connected to bridge ${initialEndpoint.instanceId}.`);
 }
 
-const isDirectRun = Boolean((import.meta as ImportMeta & { main?: boolean }).main);
+const isDirectRun = Boolean(
+  (import.meta as ImportMeta & { main?: boolean }).main
+);
 if (isDirectRun) {
   main().catch((error) => {
     const adapter = (() => {

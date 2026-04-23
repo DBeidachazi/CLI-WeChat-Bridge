@@ -1,14 +1,20 @@
-﻿import fs from "node:fs";
-import path from "node:path";
+﻿import type {
+  ChildProcess,
+  ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { spawn as spawnChild } from "node:child_process";
-import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
+import fs from "node:fs";
+import {
+  getConfiguredCodexApprovalPolicy,
+  getConfiguredCodexSandboxMode,
+} from "../config/bridge-config.ts";
+import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
+import * as shared from "./bridge-adapters.shared.ts";
 import type {
   BridgeAdapterInput,
   BridgeResumeSessionCandidate,
   BridgeThreadSwitchReason,
   BridgeThreadSwitchSource,
-  BridgeTurnOrigin,
-  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -16,12 +22,6 @@ import {
   nowIso,
   truncatePreview,
 } from "./bridge-utils.ts";
-import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
-import * as shared from "./bridge-adapters.shared.ts";
-import {
-  getConfiguredCodexApprovalPolicy,
-  getConfiguredCodexSandboxMode,
-} from "../config/bridge-config.ts";
 
 type AdapterOptions = shared.AdapterOptions;
 type CodexActiveTurn = shared.CodexActiveTurn;
@@ -105,7 +105,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private pendingRpcRequests = new Map<string, CodexRpcPendingRequest>();
   private sharedThreadId: string | null = null;
   private announcedThreadId: string | null = null;
-  private pendingThreadAnnouncement: CodexPendingThreadAnnouncement | null = null;
+  private pendingThreadAnnouncement: CodexPendingThreadAnnouncement | null =
+    null;
   private activeTurn: CodexActiveTurn | null = null;
   private bridgeOwnedTurnIds = new Set<string>();
   private recentBridgeThreadSignalAtById = new Map<string, number>();
@@ -143,13 +144,15 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }> = [];
   private localInputListener: ((chunk: string | Buffer) => void) | null = null;
   private interruptTimer: ReturnType<typeof setTimeout> | null = null;
-  private finalReplyCompletionTimer: ReturnType<typeof setTimeout> | null = null;
+  private finalReplyCompletionTimer: ReturnType<typeof setTimeout> | null =
+    null;
   private finalReplyCompletionTurnId: string | null = null;
   private resumeThreadId: string | null;
 
   constructor(options: AdapterOptions) {
     super(options);
-    this.resumeThreadId = options.initialSharedSessionId ?? options.initialSharedThreadId ?? null;
+    this.resumeThreadId =
+      options.initialSharedSessionId ?? options.initialSharedThreadId ?? null;
     if (this.resumeThreadId && options.renderMode !== "panel") {
       this.state.sharedSessionId = this.resumeThreadId;
       this.state.sharedThreadId = this.resumeThreadId;
@@ -183,10 +186,13 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       throw new Error("Codex app-server is not ready.");
     }
 
-    return buildCodexCliArgs(`ws://${CODEX_APP_SERVER_HOST}:${this.appServerPort}`, {
-      inlineMode: this.options.renderMode !== "panel",
-      profile: this.options.profile,
-    });
+    return buildCodexCliArgs(
+      `ws://${CODEX_APP_SERVER_HOST}:${this.appServerPort}`,
+      {
+        inlineMode: this.options.renderMode !== "panel",
+        profile: this.options.profile,
+      }
+    );
   }
 
   protected override afterStart(): void {
@@ -210,13 +216,19 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       throw new Error("codex adapter is not running.");
     }
     if (this.state.status === "busy") {
-      throw new Error("codex is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "codex is still working. Wait for the current reply or use /stop."
+      );
     }
     if (this.pendingApproval) {
-      throw new Error("A Codex approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "A Codex approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
     if (this.startupBlocker) {
-      throw new Error("Codex is waiting for local terminal input before the session can continue.");
+      throw new Error(
+        "Codex is waiting for local terminal input before the session can continue."
+      );
     }
 
     await delay(this.warmupUntilMs - Date.now());
@@ -224,7 +236,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       throw new Error("codex adapter is not running.");
     }
     if (this.startupBlocker) {
-      throw new Error("Codex is waiting for local terminal input before the session can continue.");
+      throw new Error(
+        "Codex is waiting for local terminal input before the session can continue."
+      );
     }
 
     this.clearInterruptTimer();
@@ -239,14 +253,16 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.writeToPty("\r");
   }
 
-  override async listResumeSessions(limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  override async listResumeSessions(
+    limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     return listCodexResumeSessions(this.options.cwd, limit);
   }
 
   override async resumeSession(threadId: string): Promise<void> {
     if (this.isNativePanelMode()) {
       throw new Error(
-        'WeChat /resume is disabled in codex mode. Use /resume directly inside "wechat-codex"; WeChat will follow the active local thread.',
+        'WeChat /resume is disabled in codex mode. Use /resume directly inside "wechat-codex"; WeChat will follow the active local thread.'
       );
     }
     await this.resumeSharedThread(threadId);
@@ -261,7 +277,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return false;
     }
 
-    if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+    if (
+      this.state.status !== "busy" &&
+      this.state.status !== "awaiting_approval"
+    ) {
       return false;
     }
 
@@ -339,7 +358,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     if (approval) {
       this.startupBlocker = approval.commandPreview;
       if (this.state.status !== "awaiting_approval") {
-        this.setStatus("awaiting_approval", "Codex is waiting for local terminal input.");
+        this.setStatus(
+          "awaiting_approval",
+          "Codex is waiting for local terminal input."
+        );
       }
       return;
     }
@@ -366,7 +388,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private isCodexClientRunning(): boolean {
-    return this.isNativePanelMode() ? Boolean(this.nativeProcess) : Boolean(this.pty);
+    return this.isNativePanelMode()
+      ? Boolean(this.nativeProcess)
+      : Boolean(this.pty);
   }
 
   private async startNativeClient(): Promise<void> {
@@ -383,7 +407,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
           env: this.buildEnv(),
           stdio: "inherit",
           windowsHide: false,
-        },
+        }
       );
 
       this.nativeProcess = child;
@@ -422,7 +446,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private handleNativeExit(
     exitCode: number | undefined,
     signal?: NodeJS.Signals,
-    startupError?: Error,
+    startupError?: Error
   ): void {
     const expectedShutdown = shouldTreatCodexNativeExitAsExpected({
       renderMode: this.options.renderMode,
@@ -497,7 +521,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       } catch {
         finish();
       }
-      const timer = setTimeout(() => finish(), 1_500);
+      const timer = setTimeout(() => finish(), 1500);
       timer.unref?.();
     });
   }
@@ -533,11 +557,13 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.maybeApplyRecentSessionFallback();
 
     if (!this.sessionFilePath) {
-      const startedAtMs = this.state.startedAt ? Date.parse(this.state.startedAt) : Date.now();
+      const startedAtMs = this.state.startedAt
+        ? Date.parse(this.state.startedAt)
+        : Date.now();
       this.sessionFilePath = findCodexSessionFile(
         this.options.cwd,
         startedAtMs,
-        { threadId: this.sharedThreadId ?? undefined },
+        { threadId: this.sharedThreadId ?? undefined }
       );
       if (!this.sessionFilePath) {
         return;
@@ -583,10 +609,16 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     if (now < this.nextSessionFallbackScanAtMs) {
       return;
     }
-    this.nextSessionFallbackScanAtMs = now + CODEX_SESSION_FALLBACK_SCAN_INTERVAL_MS;
+    this.nextSessionFallbackScanAtMs =
+      now + CODEX_SESSION_FALLBACK_SCAN_INTERVAL_MS;
 
-    const startedAtMs = this.state.startedAt ? Date.parse(this.state.startedAt) : now;
-    const candidate = findRecentCodexSessionFileForCwd(this.options.cwd, startedAtMs);
+    const startedAtMs = this.state.startedAt
+      ? Date.parse(this.state.startedAt)
+      : now;
+    const candidate = findRecentCodexSessionFileForCwd(
+      this.options.cwd,
+      startedAtMs
+    );
     if (!candidate) {
       return;
     }
@@ -601,7 +633,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     if (candidate.threadId !== this.sharedThreadId) {
-      if (this.sessionFilePath && candidate.modifiedAtMs <= currentSessionModifiedAtMs) {
+      if (
+        this.sessionFilePath &&
+        candidate.modifiedAtMs <= currentSessionModifiedAtMs
+      ) {
         return;
       }
 
@@ -637,16 +672,25 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
-    if (!isRecord(parsed) || !isRecord(parsed.payload) || typeof parsed.payload.type !== "string") {
+    if (
+      !(isRecord(parsed) && isRecord(parsed.payload)) ||
+      typeof parsed.payload.type !== "string"
+    ) {
       return;
     }
 
-    if (shouldIgnoreCodexSessionReplayEntry(parsed.timestamp, this.sessionIgnoreBeforeMs)) {
+    if (
+      shouldIgnoreCodexSessionReplayEntry(
+        parsed.timestamp,
+        this.sessionIgnoreBeforeMs
+      )
+    ) {
       return;
     }
 
     const payload = parsed.payload;
-    const timestamp = typeof parsed.timestamp === "string" ? parsed.timestamp : nowIso();
+    const timestamp =
+      typeof parsed.timestamp === "string" ? parsed.timestamp : nowIso();
     if (this.sessionIgnoreBeforeMs !== null) {
       this.sessionIgnoreBeforeMs = null;
     }
@@ -693,7 +737,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         this.state.activeTurnOrigin = origin;
 
         if (origin === "local") {
-          const turnId = this.activeTurn?.turnId ?? this.state.activeTurnId ?? null;
+          const turnId =
+            this.activeTurn?.turnId ?? this.state.activeTurnId ?? null;
           if (turnId && !this.mirroredUserInputTurnIds.has(turnId)) {
             this.mirroredUserInputTurnIds.add(turnId);
             this.emit({
@@ -704,14 +749,19 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
             });
           }
 
-          if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+          if (
+            this.state.status !== "busy" &&
+            this.state.status !== "awaiting_approval"
+          ) {
             this.setStatus("busy", "Codex is busy with a local terminal turn.");
           }
 
           if (
-            !turnId &&
-            !this.isRpcSocketOpen() &&
-            isRecentIsoTimestamp(timestamp, CODEX_SESSION_LOCAL_MIRROR_FALLBACK_WINDOW_MS)
+            !(turnId || this.isRpcSocketOpen()) &&
+            isRecentIsoTimestamp(
+              timestamp,
+              CODEX_SESSION_LOCAL_MIRROR_FALLBACK_WINDOW_MS
+            )
           ) {
             this.emit({
               type: "mirrored_user_input",
@@ -725,7 +775,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       }
 
       case "agent_message": {
-        if (payload.phase !== "final_answer" || typeof payload.message !== "string") {
+        if (
+          payload.phase !== "final_answer" ||
+          typeof payload.message !== "string"
+        ) {
           return;
         }
 
@@ -733,7 +786,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         if (message) {
           this.sessionFinalText = message;
           this.state.lastOutputAt = timestamp;
-          const activeTurnId = this.activeTurn?.turnId ?? this.state.activeTurnId ?? null;
+          const activeTurnId =
+            this.activeTurn?.turnId ?? this.state.activeTurnId ?? null;
           if (activeTurnId) {
             this.recordTurnActivity(activeTurnId, timestamp);
             this.scheduleFinalReplyCompletionIfEligible(activeTurnId);
@@ -816,7 +870,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     const cutoff = Date.now() - 60_000;
     this.pendingInjectedInputs = this.pendingInjectedInputs.filter(
-      (entry) => entry.createdAtMs >= cutoff,
+      (entry) => entry.createdAtMs >= cutoff
     );
     this.pendingInjectedInputs.push({
       text,
@@ -824,7 +878,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       createdAtMs: Date.now(),
     });
     if (this.pendingInjectedInputs.length > 8) {
-      this.pendingInjectedInputs.splice(0, this.pendingInjectedInputs.length - 8);
+      this.pendingInjectedInputs.splice(
+        0,
+        this.pendingInjectedInputs.length - 8
+      );
     }
   }
 
@@ -836,11 +893,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     const cutoff = Date.now() - 60_000;
     this.pendingInjectedInputs = this.pendingInjectedInputs.filter(
-      (entry) => entry.createdAtMs >= cutoff,
+      (entry) => entry.createdAtMs >= cutoff
     );
 
     const index = this.pendingInjectedInputs.findIndex(
-      (entry) => entry.normalizedText === normalizedMessage,
+      (entry) => entry.normalizedText === normalizedMessage
     );
     if (index < 0) {
       return false;
@@ -864,14 +921,24 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.recoverStaleBusyStateIfNeeded();
     this.recoverStaleActiveTurnStateIfNeeded();
     if (this.pendingApproval) {
-      throw new Error("A Codex approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "A Codex approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
-    if (this.pendingTurnStart || this.activeTurn || this.state.status === "busy") {
+    if (
+      this.pendingTurnStart ||
+      this.activeTurn ||
+      this.state.status === "busy"
+    ) {
       const origin = this.state.activeTurnOrigin;
       if (origin === "local") {
-        throw new Error("The local Codex panel is still working. Wait for the current reply or use /stop.");
+        throw new Error(
+          "The local Codex panel is still working. Wait for the current reply or use /stop."
+        );
       }
-      throw new Error("codex is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "codex is still working. Wait for the current reply or use /stop."
+      );
     }
 
     this.clearInterruptTimer();
@@ -904,7 +971,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
       const turnId = this.extractTurnIdFromResponse(response);
       if (!turnId) {
-        throw new Error("Codex did not return a turn id for the requested turn.");
+        throw new Error(
+          "Codex did not return a turn id for the requested turn."
+        );
       }
 
       this.bindActiveTurn({
@@ -935,7 +1004,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     const turnPending =
-      this.pendingTurnStart || this.state.status === "busy" || this.state.status === "awaiting_approval";
+      this.pendingTurnStart ||
+      this.state.status === "busy" ||
+      this.state.status === "awaiting_approval";
     if (!turnPending) {
       return false;
     }
@@ -978,7 +1049,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         env,
         stdio: "pipe",
         windowsHide: true,
-      },
+      }
     );
 
     this.appServer = child;
@@ -1008,8 +1079,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         return;
       }
 
-      const exitLabel =
-        signal ? `signal ${signal}` : `code ${typeof code === "number" ? code : "unknown"}`;
+      const exitLabel = signal
+        ? `signal ${signal}`
+        : `code ${typeof code === "number" ? code : "unknown"}`;
       const details = this.describeAppServerLog();
       this.emit({
         type: "fatal_error",
@@ -1024,12 +1096,14 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       await waitForTcpPort(
         CODEX_APP_SERVER_HOST,
         port,
-        CODEX_APP_SERVER_READY_TIMEOUT_MS,
+        CODEX_APP_SERVER_READY_TIMEOUT_MS
       );
     } catch (err) {
       await this.stopAppServer();
       const details = this.describeAppServerLog();
-      throw new Error(`Failed to start Codex app-server: ${String(err)}${details}`);
+      throw new Error(
+        `Failed to start Codex app-server: ${String(err)}${details}`
+      );
     }
   }
 
@@ -1061,25 +1135,33 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       }
     }
 
-    throw new Error(`Failed to connect to Codex app-server websocket: ${lastError}`);
+    throw new Error(
+      `Failed to connect to Codex app-server websocket: ${lastError}`
+    );
   }
 
-  private async openRpcSocket(url: string, timeoutMs: number): Promise<WebSocket> {
+  private async openRpcSocket(
+    url: string,
+    timeoutMs: number
+  ): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(url);
       let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        try {
-          socket.close();
-        } catch {
-          // Best effort cleanup after timeout.
-        }
-        reject(new Error(`Timed out opening Codex websocket ${url}.`));
-      }, Math.max(500, timeoutMs));
+      const timer = setTimeout(
+        () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          try {
+            socket.close();
+          } catch {
+            // Best effort cleanup after timeout.
+          }
+          reject(new Error(`Timed out opening Codex websocket ${url}.`));
+        },
+        Math.max(500, timeoutMs)
+      );
 
       const cleanup = () => {
         clearTimeout(timer);
@@ -1095,7 +1177,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
           cleanup();
           resolve(socket);
         },
-        { once: true },
+        { once: true }
       );
 
       socket.addEventListener(
@@ -1108,7 +1190,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
           cleanup();
           reject(new Error(`Failed to open Codex websocket ${url}.`));
         },
-        { once: true },
+        { once: true }
       );
     });
   }
@@ -1152,7 +1234,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       };
 
       socket.addEventListener("close", () => finish(), { once: true });
-      const timer = setTimeout(() => finish(), 1_000);
+      const timer = setTimeout(() => finish(), 1000);
       timer.unref?.();
 
       try {
@@ -1198,7 +1280,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         return false;
       }
 
-      if (!this.appServer || !this.appServerPort) {
+      if (!(this.appServer && this.appServerPort)) {
         if (
           shouldSuppressCodexTransportFatalError({
             transportShuttingDown: this.appServerShuttingDown,
@@ -1222,8 +1304,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       let lastError = "Codex websocket connection closed.";
 
       while (
-        !this.shuttingDown &&
-        !this.cleanPanelExitInProgress &&
+        !(this.shuttingDown || this.cleanPanelExitInProgress) &&
         Date.now() < reconnectDeadline
       ) {
         try {
@@ -1319,7 +1400,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     const threadId = this.extractThreadIdFromResponse(response);
     if (!threadId) {
-      throw new Error("Codex did not return a thread id for the bridge session.");
+      throw new Error(
+        "Codex did not return a thread id for the bridge session."
+      );
     }
 
     this.rememberBridgeOwnedThreadSignal(threadId);
@@ -1329,7 +1412,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private async resumeSharedThread(
     threadId: string,
-    options: { startup?: boolean } = {},
+    options: { startup?: boolean } = {}
   ): Promise<void> {
     const trimmedThreadId = threadId.trim();
     if (!trimmedThreadId) {
@@ -1337,7 +1420,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     if (this.pendingApproval) {
-      throw new Error("A Codex approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "A Codex approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
 
     if (
@@ -1347,7 +1432,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         this.state.status === "busy" ||
         this.state.status === "awaiting_approval")
     ) {
-      throw new Error("codex is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "codex is still working. Wait for the current reply or use /stop."
+      );
     }
 
     const response = await this.sendRpcRequest("thread/resume", {
@@ -1360,7 +1447,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     const resumedThreadId = this.extractThreadIdFromResponse(response);
     if (!resumedThreadId) {
-      throw new Error("Codex did not return a thread id while resuming the saved thread.");
+      throw new Error(
+        "Codex did not return a thread id while resuming the saved thread."
+      );
     }
 
     this.rememberBridgeOwnedThreadSignal(resumedThreadId);
@@ -1377,14 +1466,14 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private extractThreadIdFromResponse(response: unknown): string | null {
-    if (!isRecord(response) || !isRecord(response.thread)) {
+    if (!(isRecord(response) && isRecord(response.thread))) {
       return null;
     }
     return typeof response.thread.id === "string" ? response.thread.id : null;
   }
 
   private extractTurnIdFromResponse(response: unknown): string | null {
-    if (!isRecord(response) || !isRecord(response.turn)) {
+    if (!(isRecord(response) && isRecord(response.turn))) {
       return null;
     }
     return typeof response.turn.id === "string" ? response.turn.id : null;
@@ -1405,7 +1494,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     const queuedRequests = this.queuedTurnServerRequests;
     this.queuedTurnServerRequests = [];
     for (const request of queuedRequests) {
-      this.handleRpcServerRequest(request.requestId, request.method, request.params);
+      this.handleRpcServerRequest(
+        request.requestId,
+        request.method,
+        request.params
+      );
     }
   }
 
@@ -1424,7 +1517,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.clearInterruptTimer();
     this.interruptTimer = setTimeout(() => {
       this.interruptTimer = null;
-      if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+      if (
+        this.state.status !== "busy" &&
+        this.state.status !== "awaiting_approval"
+      ) {
         return;
       }
 
@@ -1452,7 +1548,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         status: this.state.status,
         pendingTurnStart: this.pendingTurnStart,
         hasActiveTurn: Boolean(this.activeTurn),
-        hasPendingApproval: Boolean(this.pendingApproval || this.pendingApprovalRequest),
+        hasPendingApproval: Boolean(
+          this.pendingApproval || this.pendingApprovalRequest
+        ),
         activeTurnId: this.state.activeTurnId,
       })
     ) {
@@ -1529,7 +1627,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       source?: BridgeThreadSwitchSource;
       reason?: BridgeThreadSwitchReason;
       notify?: boolean;
-    } = {},
+    } = {}
   ): void {
     const previousThreadId = this.sharedThreadId;
     this.sharedThreadId = threadId;
@@ -1599,7 +1697,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private emitThreadSwitched(
     threadId: string,
     source: BridgeThreadSwitchSource,
-    reason: BridgeThreadSwitchReason,
+    reason: BridgeThreadSwitchReason
   ): void {
     if (this.announcedThreadId === threadId) {
       if (this.pendingThreadAnnouncement?.threadId === threadId) {
@@ -1630,7 +1728,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private isPendingThreadAnnouncementStable(
-    pending: CodexPendingThreadAnnouncement,
+    pending: CodexPendingThreadAnnouncement
   ): boolean {
     return pending.signals.has("user_message") || pending.signals.size >= 2;
   }
@@ -1661,7 +1759,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     options: {
       reason: BridgeThreadSwitchReason;
       signal: CodexThreadAnnouncementSignal;
-    },
+    }
   ): void {
     if (!this.isNativePanelMode()) {
       this.updateSharedThread(threadId, {
@@ -1684,7 +1782,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
-    if (!this.pendingThreadAnnouncement || this.pendingThreadAnnouncement.threadId !== threadId) {
+    if (
+      !this.pendingThreadAnnouncement ||
+      this.pendingThreadAnnouncement.threadId !== threadId
+    ) {
       this.clearPendingThreadAnnouncement();
       this.pendingThreadAnnouncement = {
         threadId,
@@ -1699,7 +1800,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.pendingThreadAnnouncement.reason = options.reason;
     this.pendingThreadAnnouncement.signals.add(options.signal);
 
-    if (this.isPendingThreadAnnouncementStable(this.pendingThreadAnnouncement)) {
+    if (
+      this.isPendingThreadAnnouncementStable(this.pendingThreadAnnouncement)
+    ) {
       this.updateSharedThread(threadId, {
         source: "local",
         reason: options.reason,
@@ -1713,7 +1816,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private rememberBridgeOwnedThreadSignal(threadId: string): void {
     const cutoff = Date.now() - CODEX_THREAD_SIGNAL_TTL_MS;
-    for (const [candidateThreadId, recordedAtMs] of this.recentBridgeThreadSignalAtById.entries()) {
+    for (const [
+      candidateThreadId,
+      recordedAtMs,
+    ] of this.recentBridgeThreadSignalAtById.entries()) {
       if (recordedAtMs < cutoff) {
         this.recentBridgeThreadSignalAtById.delete(candidateThreadId);
       }
@@ -1755,7 +1861,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private isRpcSocketOpen(): boolean {
-    return Boolean(this.rpcSocket && this.rpcSocket.readyState === WebSocket.OPEN);
+    return Boolean(
+      this.rpcSocket && this.rpcSocket.readyState === WebSocket.OPEN
+    );
   }
 
   private async ensureRpcClientConnected(): Promise<void> {
@@ -1765,7 +1873,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     if (this.rpcReconnectPromise) {
       const reconnected = await this.rpcReconnectPromise;
-      if (!reconnected || !this.isRpcSocketOpen()) {
+      if (!(reconnected && this.isRpcSocketOpen())) {
         throw new Error("Codex websocket is not connected.");
       }
       return;
@@ -1777,7 +1885,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
   }
 
-  private async sendRpcRequest(method: string, params: unknown): Promise<unknown> {
+  private async sendRpcRequest(
+    method: string,
+    params: unknown
+  ): Promise<unknown> {
     await this.ensureRpcClientConnected();
     const socket = this.rpcSocket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -1819,7 +1930,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private async respondToApprovalRequest(
     request: CodexPendingApprovalRequest,
-    action: "confirm" | "deny",
+    action: "confirm" | "deny"
   ): Promise<void> {
     const decision = action === "confirm" ? "accept" : "decline";
     this.sendRpcMessage({
@@ -1863,7 +1974,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
   }
 
-  private handleRpcResponse(requestId: CodexRpcRequestId, payload: Record<string, unknown>): void {
+  private handleRpcResponse(
+    requestId: CodexRpcRequestId,
+    payload: Record<string, unknown>
+  ): void {
     const requestKey = this.rpcRequestKey(requestId);
     const pending = this.pendingRpcRequests.get(requestKey);
     if (!pending) {
@@ -1922,8 +2036,14 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
   }
 
-  private shouldQueuePendingTurnEvent(params: Record<string, unknown>): boolean {
-    if (!this.pendingTurnStart || this.activeTurn || !this.pendingTurnThreadId) {
+  private shouldQueuePendingTurnEvent(
+    params: Record<string, unknown>
+  ): boolean {
+    if (
+      !this.pendingTurnStart ||
+      this.activeTurn ||
+      !this.pendingTurnThreadId
+    ) {
       return false;
     }
 
@@ -1932,11 +2052,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private identifyTrackedTurn(
     method: string,
-    params: Record<string, unknown>,
+    params: Record<string, unknown>
   ): CodexActiveTurn | null {
     const threadId = getNotificationThreadId(params);
     const turnId = getNotificationTurnId(params);
-    if (!threadId || !turnId) {
+    if (!(threadId && turnId)) {
       return null;
     }
 
@@ -1991,7 +2111,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private handleTrackedTurnNotification(
     method: string,
     params: Record<string, unknown>,
-    trackedTurn: CodexActiveTurn,
+    trackedTurn: CodexActiveTurn
   ): void {
     this.state.lastOutputAt = nowIso();
     this.recordTurnActivity(trackedTurn.turnId);
@@ -2006,7 +2126,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       case "item/agentMessage/delta": {
         const itemId = typeof params.itemId === "string" ? params.itemId : null;
         const delta = typeof params.delta === "string" ? params.delta : "";
-        if (!itemId || !delta) {
+        if (!(itemId && delta)) {
           return;
         }
 
@@ -2024,14 +2144,20 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
             : null;
         const finalText = extractCodexFinalTextFromItem(params.item);
         if (itemId && finalText) {
-          this.getTurnFinalMessageMap(trackedTurn.turnId).set(itemId, finalText);
+          this.getTurnFinalMessageMap(trackedTurn.turnId).set(
+            itemId,
+            finalText
+          );
           this.scheduleFinalReplyCompletionIfEligible(trackedTurn.turnId);
         }
         return;
       }
 
       case "error": {
-        if (isRecord(params.error) && typeof params.error.message === "string") {
+        if (
+          isRecord(params.error) &&
+          typeof params.error.message === "string"
+        ) {
           this.turnErrorById.set(trackedTurn.turnId, params.error.message);
         }
         return;
@@ -2064,7 +2190,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private handleRpcServerRequest(
     requestId: CodexRpcRequestId,
     method: string,
-    params: unknown,
+    params: unknown
   ): void {
     if (
       method !== "item/commandExecution/requestApproval" &&
@@ -2073,7 +2199,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.sendRpcMessage({
         id: requestId,
         error: {
-          code: -32601,
+          code: -32_601,
           message: `Unsupported server request: ${method}`,
         },
       });
@@ -2084,7 +2210,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       this.sendRpcMessage({
         id: requestId,
         error: {
-          code: -32602,
+          code: -32_602,
           message: "Invalid Codex approval request payload.",
         },
       });
@@ -2113,7 +2239,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     requestId: CodexRpcRequestId,
     method: CodexPendingApprovalRequest["method"],
     params: Record<string, unknown>,
-    trackedTurn: CodexActiveTurn,
+    trackedTurn: CodexActiveTurn
   ): void {
     const request = buildCodexApprovalRequest(method, params);
     if (!request) {
@@ -2168,10 +2294,13 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     const thread = isRecord(params.thread) ? params.thread : null;
-    if (thread && typeof thread.cwd === "string") {
-      if (normalizeComparablePath(thread.cwd) !== normalizeComparablePath(this.options.cwd)) {
-        return;
-      }
+    if (
+      thread &&
+      typeof thread.cwd === "string" &&
+      normalizeComparablePath(thread.cwd) !==
+        normalizeComparablePath(this.options.cwd)
+    ) {
+      return;
     }
 
     if (!this.activeTurn || this.activeTurn.threadId === threadId) {
@@ -2195,7 +2324,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       trackedTurn.origin === "local" &&
       trackedTurn.threadId !== this.sharedThreadId
     ) {
-      if (!this.activeTurn || this.activeTurn.threadId === trackedTurn.threadId) {
+      if (
+        !this.activeTurn ||
+        this.activeTurn.threadId === trackedTurn.threadId
+      ) {
         this.trackLocalSharedThread(trackedTurn.threadId, {
           reason: "local_turn",
           signal: "turn_started",
@@ -2208,7 +2340,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
     if (!this.activeTurn) {
       this.setActiveTurn(trackedTurn);
-      if (trackedTurn.origin === "local" && this.state.status !== "awaiting_approval") {
+      if (
+        trackedTurn.origin === "local" &&
+        this.state.status !== "awaiting_approval"
+      ) {
         this.setStatus("busy", "Codex is busy with a local terminal turn.");
       }
       return;
@@ -2221,9 +2356,12 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private maybeMirrorLocalUserInput(
     trackedTurn: CodexActiveTurn,
-    item: unknown,
+    item: unknown
   ): void {
-    if (trackedTurn.origin !== "local" || this.mirroredUserInputTurnIds.has(trackedTurn.turnId)) {
+    if (
+      trackedTurn.origin !== "local" ||
+      this.mirroredUserInputTurnIds.has(trackedTurn.turnId)
+    ) {
       return;
     }
 
@@ -2247,7 +2385,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
 
   private handleTurnCompleted(
     trackedTurn: CodexActiveTurn,
-    params: Record<string, unknown>,
+    params: Record<string, unknown>
   ): void {
     this.clearFinalReplyCompletionTimerForTurn(trackedTurn.turnId);
     if (this.hasCompletedTurn(trackedTurn.turnId)) {
@@ -2259,14 +2397,17 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     }
 
     const turn = isRecord(params.turn) ? params.turn : null;
-    const status = turn && typeof turn.status === "string" ? turn.status : "completed";
+    const status =
+      turn && typeof turn.status === "string" ? turn.status : "completed";
     const completedError =
       turn && isRecord(turn.error) && typeof turn.error.message === "string"
         ? turn.error.message
-        : this.turnErrorById.get(trackedTurn.turnId) ?? null;
+        : (this.turnErrorById.get(trackedTurn.turnId) ?? null);
     const finalText = this.collectTurnOutput(trackedTurn.turnId);
     const completedTrackedTurn =
-      this.activeTurn?.turnId === trackedTurn.turnId ? this.activeTurn : trackedTurn;
+      this.activeTurn?.turnId === trackedTurn.turnId
+        ? this.activeTurn
+        : trackedTurn;
     const summary =
       status === "interrupted"
         ? "Interrupted"
@@ -2337,7 +2478,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   }
 
   private collectTurnOutput(turnId: string): string | null {
-    const finalMessages = Array.from(this.getTurnFinalMessageMap(turnId).values())
+    const finalMessages = Array.from(
+      this.getTurnFinalMessageMap(turnId).values()
+    )
       .map((text) => normalizeOutput(text).trim())
       .filter(Boolean);
     if (finalMessages.length > 0) {
@@ -2354,12 +2497,15 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     return deltaFallback[deltaFallback.length - 1] ?? null;
   }
 
-  private recordTurnActivity(turnId: string, timestamp: string | number = Date.now()): void {
+  private recordTurnActivity(
+    turnId: string,
+    timestamp: string | number = Date.now()
+  ): void {
     const timestampMs =
       typeof timestamp === "number" ? timestamp : Date.parse(timestamp);
     this.turnLastActivityAtMs.set(
       turnId,
-      Number.isFinite(timestampMs) ? timestampMs : Date.now(),
+      Number.isFinite(timestampMs) ? timestampMs : Date.now()
     );
   }
 
@@ -2405,7 +2551,9 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     const activeTurn = this.activeTurn;
     const finalText = this.collectTurnOutput(turnId);
     const lastActivityAtMs = this.turnLastActivityAtMs.get(turnId) ?? null;
-    const pendingApproval = Boolean(this.pendingApproval || this.pendingApprovalRequest);
+    const pendingApproval = Boolean(
+      this.pendingApproval || this.pendingApprovalRequest
+    );
     const nowMs = Date.now();
     if (
       !shouldAutoCompleteCodexWechatTurnAfterFinalReply({
@@ -2429,7 +2577,8 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
         finalText &&
         typeof lastActivityAtMs === "number"
       ) {
-        const remainingMs = CODEX_FINAL_REPLY_SETTLE_DELAY_MS - (nowMs - lastActivityAtMs);
+        const remainingMs =
+          CODEX_FINAL_REPLY_SETTLE_DELAY_MS - (nowMs - lastActivityAtMs);
         if (remainingMs > 0) {
           this.finalReplyCompletionTurnId = turnId;
           this.finalReplyCompletionTimer = setTimeout(() => {
@@ -2441,7 +2590,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return;
     }
 
-    if (!activeTurn || !finalText) {
+    if (!(activeTurn && finalText)) {
       return;
     }
 
@@ -2450,7 +2599,10 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     this.cleanupTurnArtifacts(turnId);
     this.state.lastOutputAt = nowIso();
     if (this.state.status !== "stopped") {
-      this.setStatus("idle", "Recovered delayed Codex completion after final reply.");
+      this.setStatus(
+        "idle",
+        "Recovered delayed Codex completion after final reply."
+      );
     }
     this.emit({
       type: "final_reply",
@@ -2492,7 +2644,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       } catch {
         finish();
       }
-      const timer = setTimeout(() => finish(), 1_000);
+      const timer = setTimeout(() => finish(), 1000);
       timer.unref?.();
     });
   }

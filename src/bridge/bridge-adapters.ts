@@ -1,11 +1,11 @@
-import type { BridgeAdapter } from "./bridge-types.ts";
 import { AcpCliAdapter } from "./bridge-adapters.acp.ts";
 import { ClaudeCompanionAdapter } from "./bridge-adapters.claude.ts";
-import { LocalCompanionProxyAdapter } from "./bridge-adapters.core.ts";
 import { CodexPtyAdapter } from "./bridge-adapters.codex.ts";
+import { LocalCompanionProxyAdapter } from "./bridge-adapters.core.ts";
 import { OpenCodeServerAdapter } from "./bridge-adapters.opencode.ts";
-import { ShellAdapter } from "./bridge-adapters.shell.ts";
 import type { AdapterOptions } from "./bridge-adapters.shared.ts";
+import { ShellAdapter } from "./bridge-adapters.shell.ts";
+import type { BridgeAdapter } from "./bridge-types.ts";
 
 export * from "./bridge-adapters.shared.ts";
 

@@ -1,8 +1,7 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, test } from "bun:test";
 
 import { buildAcpPromptContent } from "../../src/bridge/bridge-acp-prompt.ts";
 
@@ -10,7 +9,7 @@ const tempDirectories: string[] = [];
 
 function makeTempDirectory(): string {
   const directory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "wechat-bridge-acp-test-"),
+    path.join(os.tmpdir(), "wechat-bridge-acp-test-")
   );
   tempDirectories.push(directory);
   return directory;
@@ -55,7 +54,7 @@ describe("buildAcpPromptContent", () => {
       {
         image: true,
         audio: false,
-      },
+      }
     );
 
     expect(blocks[0]).toMatchObject({

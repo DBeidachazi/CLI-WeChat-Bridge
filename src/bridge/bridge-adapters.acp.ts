@@ -1,20 +1,29 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 
 import * as acp from "@agentclientprotocol/sdk";
-
-import { ensureWorkspaceChannelDir } from "../wechat/channel-config.ts";
 import {
+  type AcpBridgeAdapterKind,
   getConfiguredAcpMode,
   getConfiguredModelId,
   shouldAutoApproveAcpPermissions,
-  type AcpBridgeAdapterKind,
 } from "../config/bridge-config.ts";
+import { ensureWorkspaceChannelDir } from "../wechat/channel-config.ts";
+import {
+  type AcpPromptCapabilities,
+  buildAcpPromptContent,
+} from "./bridge-acp-prompt.ts";
+import {
+  buildCliEnvironment,
+  describeUnknownError,
+  isRecord,
+  resolveSpawnTarget,
+} from "./bridge-adapters.shared.ts";
 import type {
   ApprovalRequest,
   BridgeAdapter,
@@ -23,21 +32,7 @@ import type {
   BridgeEvent,
   BridgeResumeSessionCandidate,
 } from "./bridge-types.ts";
-import {
-  buildCliEnvironment,
-  describeUnknownError,
-  isRecord,
-  resolveSpawnTarget,
-} from "./bridge-adapters.shared.ts";
-import {
-  buildAcpPromptContent,
-  type AcpPromptCapabilities,
-} from "./bridge-acp-prompt.ts";
-import {
-  normalizeOutput,
-  nowIso,
-  truncatePreview,
-} from "./bridge-utils.ts";
+import { normalizeOutput, nowIso, truncatePreview } from "./bridge-utils.ts";
 
 type AcpSessionRecord = {
   sessionId: string;
@@ -66,8 +61,14 @@ type PendingPermissionRequest = {
 
 const DEFAULT_TERMINAL_OUTPUT_LIMIT = 128 * 1024;
 
-function buildSessionCachePath(kind: AcpBridgeAdapterKind, cwd: string): string {
-  return path.join(ensureWorkspaceChannelDir(cwd).workspaceDir, `${kind}-acp-sessions.json`);
+function buildSessionCachePath(
+  kind: AcpBridgeAdapterKind,
+  cwd: string
+): string {
+  return path.join(
+    ensureWorkspaceChannelDir(cwd).workspaceDir,
+    `${kind}-acp-sessions.json`
+  );
 }
 
 function readSessionCache(cachePath: string): AcpSessionRecord[] {
@@ -82,26 +83,35 @@ function readSessionCache(cachePath: string): AcpSessionRecord[] {
     }
 
     return parsed
-      .filter((entry): entry is AcpSessionRecord => {
-        return (
+      .filter(
+        (entry): entry is AcpSessionRecord =>
           isRecord(entry) &&
           typeof entry.sessionId === "string" &&
           typeof entry.title === "string" &&
           typeof entry.updatedAt === "string"
-        );
-      })
-      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      );
   } catch {
     return [];
   }
 }
 
-function writeSessionCache(cachePath: string, sessions: AcpSessionRecord[]): void {
+function writeSessionCache(
+  cachePath: string,
+  sessions: AcpSessionRecord[]
+): void {
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
   fs.writeFileSync(cachePath, JSON.stringify(sessions, null, 2), "utf8");
 }
 
-function appendBoundedOutput(current: string, chunk: string, byteLimit: number): string {
+function appendBoundedOutput(
+  current: string,
+  chunk: string,
+  byteLimit: number
+): string {
   const next = `${current}${chunk}`;
   if (Buffer.byteLength(next, "utf8") <= byteLimit) {
     return next;
@@ -116,7 +126,7 @@ function appendBoundedOutput(current: string, chunk: string, byteLimit: number):
 
 function pickPermissionOption(
   options: acp.PermissionOption[],
-  prefixes: acp.PermissionOptionKind[],
+  prefixes: acp.PermissionOptionKind[]
 ): acp.PermissionOption | null {
   for (const prefix of prefixes) {
     const matched = options.find((option) => option.kind === prefix);
@@ -128,13 +138,19 @@ function pickPermissionOption(
   return options[0] ?? null;
 }
 
-function buildPermissionRequest(kind: AcpBridgeAdapterKind, params: acp.RequestPermissionRequest): ApprovalRequest {
+function buildPermissionRequest(
+  kind: AcpBridgeAdapterKind,
+  params: acp.RequestPermissionRequest
+): ApprovalRequest {
   const toolCall = params.toolCall;
   const commandPreview = [
     toolCall.title ?? `${kind} tool call`,
     Array.isArray(toolCall.locations) && toolCall.locations.length > 0
       ? toolCall.locations
-          .map((location) => `${location.path}${location.line ? `:${location.line}` : ""}`)
+          .map(
+            (location) =>
+              `${location.path}${location.line ? `:${location.line}` : ""}`
+          )
           .join(", ")
       : "",
   ]
@@ -144,16 +160,21 @@ function buildPermissionRequest(kind: AcpBridgeAdapterKind, params: acp.RequestP
   return {
     source: "cli",
     summary: `${kind} needs permission before continuing a tool call.`,
-    commandPreview: truncatePreview(commandPreview || `${kind} ACP tool call`, 180),
+    commandPreview: truncatePreview(
+      commandPreview || `${kind} ACP tool call`,
+      180
+    ),
     toolName: typeof toolCall.kind === "string" ? toolCall.kind : undefined,
     detailLabel: "Raw input",
     detailPreview:
-      toolCall.rawInput === undefined ? undefined : truncatePreview(JSON.stringify(toolCall.rawInput), 300),
+      toolCall.rawInput === undefined
+        ? undefined
+        : truncatePreview(JSON.stringify(toolCall.rawInput), 300),
   };
 }
 
 function readAgentPromptCapabilities(
-  initializeResponse: unknown,
+  initializeResponse: unknown
 ): AcpPromptCapabilities {
   if (!isRecord(initializeResponse)) {
     return { image: false, audio: false };
@@ -175,7 +196,7 @@ function readAgentPromptCapabilities(
 
 function shouldResetSessionAfterTaskFailure(
   kind: AcpBridgeAdapterKind,
-  errorMessage: string,
+  errorMessage: string
 ): boolean {
   if (kind !== "gemini") {
     return false;
@@ -238,7 +259,10 @@ export class AcpCliAdapter implements BridgeAdapter {
     this.shuttingDown = false;
     this.setStatus("starting", `Starting ${this.options.kind} ACP adapter...`);
 
-    const spawnTarget = resolveSpawnTarget(this.options.command, this.options.kind);
+    const spawnTarget = resolveSpawnTarget(
+      this.options.command,
+      this.options.kind
+    );
     const env = buildCliEnvironment(this.options.kind);
     const child = spawn(spawnTarget.file, spawnTarget.args, {
       cwd: this.options.cwd,
@@ -247,8 +271,10 @@ export class AcpCliAdapter implements BridgeAdapter {
       windowsHide: true,
     });
 
-    if (!child.stdin || !child.stdout || !child.stderr) {
-      throw new Error(`${this.options.kind} ACP process did not expose stdio pipes.`);
+    if (!(child.stdin && child.stdout && child.stderr)) {
+      throw new Error(
+        `${this.options.kind} ACP process did not expose stdio pipes.`
+      );
     }
 
     this.child = child;
@@ -262,9 +288,12 @@ export class AcpCliAdapter implements BridgeAdapter {
     try {
       const stream = acp.ndJsonStream(
         Writable.toWeb(child.stdin),
-        Readable.toWeb(child.stdout),
+        Readable.toWeb(child.stdout)
       );
-      this.connection = new acp.ClientSideConnection(() => this.buildClient(), stream);
+      this.connection = new acp.ClientSideConnection(
+        () => this.buildClient(),
+        stream
+      );
       const initializeResponse = await this.connection.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
         clientInfo: {
@@ -280,7 +309,9 @@ export class AcpCliAdapter implements BridgeAdapter {
           terminal: true,
         },
       });
-      this.promptCapabilities = readAgentPromptCapabilities(initializeResponse as unknown);
+      this.promptCapabilities = readAgentPromptCapabilities(
+        initializeResponse as unknown
+      );
 
       if (this.options.initialSharedSessionId) {
         await this.restoreSession(this.options.initialSharedSessionId, true);
@@ -306,10 +337,14 @@ export class AcpCliAdapter implements BridgeAdapter {
       throw new Error(`${this.options.kind} session is not available.`);
     }
     if (this.currentPromptPromise) {
-      throw new Error(`${this.options.kind} is still working. Wait for the current reply or use /stop.`);
+      throw new Error(
+        `${this.options.kind} is still working. Wait for the current reply or use /stop.`
+      );
     }
     if (this.pendingPermission) {
-      throw new Error(`${this.options.kind} is waiting for a permission decision.`);
+      throw new Error(
+        `${this.options.kind} is waiting for a permission decision.`
+      );
     }
 
     const sessionId = this.currentSessionId;
@@ -323,7 +358,10 @@ export class AcpCliAdapter implements BridgeAdapter {
       try {
         const response = await this.connection!.prompt({
           sessionId,
-          prompt: buildAcpPromptContent(normalizedInput, this.promptCapabilities) as acp.ContentBlock[],
+          prompt: buildAcpPromptContent(
+            normalizedInput,
+            this.promptCapabilities
+          ) as acp.ContentBlock[],
         });
 
         const finalText = normalizeOutput(this.currentAssistantText).trim();
@@ -360,7 +398,9 @@ export class AcpCliAdapter implements BridgeAdapter {
 
         const errorMessage = describeUnknownError(error);
         let sessionResetSuffix = "";
-        if (shouldResetSessionAfterTaskFailure(this.options.kind, errorMessage)) {
+        if (
+          shouldResetSessionAfterTaskFailure(this.options.kind, errorMessage)
+        ) {
           try {
             await this.createSession(true);
             sessionResetSuffix =
@@ -388,7 +428,9 @@ export class AcpCliAdapter implements BridgeAdapter {
     })();
   }
 
-  async listResumeSessions(limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  async listResumeSessions(
+    limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     const remote = await this.listRemoteSessions();
     const merged = new Map<string, AcpSessionRecord>();
     for (const session of readSessionCache(this.sessionCachePath)) {
@@ -396,13 +438,19 @@ export class AcpCliAdapter implements BridgeAdapter {
     }
     for (const session of remote) {
       const previous = merged.get(session.sessionId);
-      if (!previous || Date.parse(session.updatedAt) > Date.parse(previous.updatedAt)) {
+      if (
+        !previous ||
+        Date.parse(session.updatedAt) > Date.parse(previous.updatedAt)
+      ) {
         merged.set(session.sessionId, session);
       }
     }
 
     return Array.from(merged.values())
-      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+      .sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      )
       .slice(0, Math.max(1, limit))
       .map((session) => ({
         sessionId: session.sessionId,
@@ -413,14 +461,16 @@ export class AcpCliAdapter implements BridgeAdapter {
 
   async resumeSession(sessionId: string): Promise<void> {
     if (this.currentPromptPromise) {
-      throw new Error(`${this.options.kind} is still working. Wait for the current reply or use /stop.`);
+      throw new Error(
+        `${this.options.kind} is still working. Wait for the current reply or use /stop.`
+      );
     }
 
     await this.restoreSession(sessionId, false);
   }
 
   async interrupt(): Promise<boolean> {
-    if (!this.connection || !this.currentSessionId) {
+    if (!(this.connection && this.currentSessionId)) {
       return false;
     }
 
@@ -463,19 +513,19 @@ export class AcpCliAdapter implements BridgeAdapter {
       this.pendingPermission.params.options,
       action === "confirm"
         ? ["allow_always", "allow_once"]
-        : ["reject_always", "reject_once"],
+        : ["reject_always", "reject_once"]
     );
-    if (!option) {
+    if (option) {
       this.pendingPermission.resolve({
         outcome: {
-          outcome: "cancelled",
+          outcome: "selected",
+          optionId: option.optionId,
         },
       });
     } else {
       this.pendingPermission.resolve({
         outcome: {
-          outcome: "selected",
-          optionId: option.optionId,
+          outcome: "cancelled",
         },
       });
     }
@@ -528,9 +578,8 @@ export class AcpCliAdapter implements BridgeAdapter {
 
   private buildClient(): acp.Client {
     return {
-      requestPermission: async (params) => {
-        return await this.handlePermissionRequest(params);
-      },
+      requestPermission: async (params) =>
+        await this.handlePermissionRequest(params),
       sessionUpdate: async (params) => {
         await this.handleSessionUpdate(params);
       },
@@ -551,9 +600,7 @@ export class AcpCliAdapter implements BridgeAdapter {
         await fsPromises.writeFile(params.path, params.content, "utf8");
         return {};
       },
-      createTerminal: async (params) => {
-        return await this.createTerminal(params);
-      },
+      createTerminal: async (params) => await this.createTerminal(params),
       terminalOutput: async (params) => {
         const terminal = this.terminals.get(params.terminalId);
         if (!terminal) {
@@ -561,7 +608,9 @@ export class AcpCliAdapter implements BridgeAdapter {
         }
         return {
           output: terminal.output,
-          truncated: Buffer.byteLength(terminal.output, "utf8") >= terminal.outputByteLimit,
+          truncated:
+            Buffer.byteLength(terminal.output, "utf8") >=
+            terminal.outputByteLimit,
           exitStatus: terminal.exitStatus,
         };
       },
@@ -601,9 +650,12 @@ export class AcpCliAdapter implements BridgeAdapter {
   }
 
   private async handlePermissionRequest(
-    params: acp.RequestPermissionRequest,
+    params: acp.RequestPermissionRequest
   ): Promise<acp.RequestPermissionResponse> {
-    const allowOption = pickPermissionOption(params.options, ["allow_always", "allow_once"]);
+    const allowOption = pickPermissionOption(params.options, [
+      "allow_always",
+      "allow_once",
+    ]);
     if (!allowOption) {
       return {
         outcome: {
@@ -638,7 +690,9 @@ export class AcpCliAdapter implements BridgeAdapter {
     });
   }
 
-  private async handleSessionUpdate(params: acp.SessionNotification): Promise<void> {
+  private async handleSessionUpdate(
+    params: acp.SessionNotification
+  ): Promise<void> {
     this.state.lastOutputAt = nowIso();
 
     const update = params.update;
@@ -649,18 +703,20 @@ export class AcpCliAdapter implements BridgeAdapter {
         }
         break;
       case "tool_call":
-        this.emitNotice(`${this.options.kind} tool: ${update.title}${update.status ? ` (${update.status})` : ""}`);
+        this.emitNotice(
+          `${this.options.kind} tool: ${update.title}${update.status ? ` (${update.status})` : ""}`
+        );
         break;
       case "tool_call_update":
         this.emitNotice(
-          `${this.options.kind} tool update: ${update.title ?? update.toolCallId}${update.status ? ` (${update.status})` : ""}`,
+          `${this.options.kind} tool update: ${update.title ?? update.toolCallId}${update.status ? ` (${update.status})` : ""}`
         );
         break;
       case "plan":
         this.emitNotice(
           update.entries
             .map((entry) => `${entry.status}: ${entry.content}`)
-            .join("\n"),
+            .join("\n")
         );
         break;
       case "session_info_update":
@@ -672,7 +728,9 @@ export class AcpCliAdapter implements BridgeAdapter {
         }
         break;
       case "current_mode_update":
-        this.emitNotice(`${this.options.kind} mode switched to ${update.currentModeId}.`);
+        this.emitNotice(
+          `${this.options.kind} mode switched to ${update.currentModeId}.`
+        );
         break;
       default:
         break;
@@ -680,7 +738,9 @@ export class AcpCliAdapter implements BridgeAdapter {
   }
 
   private handleChildStderr(chunk: string | Buffer): void {
-    const text = normalizeOutput(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    const text = normalizeOutput(
+      typeof chunk === "string" ? chunk : chunk.toString("utf8")
+    );
     if (!text) {
       return;
     }
@@ -692,7 +752,10 @@ export class AcpCliAdapter implements BridgeAdapter {
     });
   }
 
-  private handleProcessExit(code: number | null, signal: NodeJS.Signals | null): void {
+  private handleProcessExit(
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): void {
     const shuttingDown = this.shuttingDown;
     this.child = null;
     this.connection = null;
@@ -749,7 +812,10 @@ export class AcpCliAdapter implements BridgeAdapter {
     }
   }
 
-  private async restoreSession(sessionId: string, startup: boolean): Promise<void> {
+  private async restoreSession(
+    sessionId: string,
+    startup: boolean
+  ): Promise<void> {
     if (!this.connection) {
       throw new Error(`${this.options.kind} ACP connection is not ready.`);
     }
@@ -856,12 +922,11 @@ export class AcpCliAdapter implements BridgeAdapter {
     }
   }
 
-  private rememberSession(params: {
-    sessionId: string;
-    title: string;
-  }): void {
+  private rememberSession(params: { sessionId: string; title: string }): void {
     const current = readSessionCache(this.sessionCachePath);
-    const next = new Map(current.map((session) => [session.sessionId, session]));
+    const next = new Map(
+      current.map((session) => [session.sessionId, session])
+    );
     next.set(params.sessionId, {
       sessionId: params.sessionId,
       title: truncatePreview(params.title, 120),
@@ -870,13 +935,14 @@ export class AcpCliAdapter implements BridgeAdapter {
     writeSessionCache(
       this.sessionCachePath,
       Array.from(next.values()).sort(
-        (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-      ),
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      )
     );
   }
 
   private async createTerminal(
-    params: acp.CreateTerminalRequest,
+    params: acp.CreateTerminalRequest
   ): Promise<acp.CreateTerminalResponse> {
     const terminalId = crypto.randomUUID();
     const spawnTarget = resolveSpawnTarget(params.command, this.options.kind, {
@@ -884,7 +950,9 @@ export class AcpCliAdapter implements BridgeAdapter {
     });
     const env = {
       ...buildCliEnvironment(this.options.kind),
-      ...Object.fromEntries((params.env ?? []).map((entry) => [entry.name, entry.value])),
+      ...Object.fromEntries(
+        (params.env ?? []).map((entry) => [entry.name, entry.value])
+      ),
     };
     const child = spawn(spawnTarget.file, spawnTarget.args, {
       cwd: params.cwd ?? this.options.cwd,
@@ -893,14 +961,17 @@ export class AcpCliAdapter implements BridgeAdapter {
       windowsHide: true,
     });
 
-    if (!child.stdout || !child.stderr) {
+    if (!(child.stdout && child.stderr)) {
       throw new Error("Failed to create ACP terminal with piped stdio.");
     }
 
-    let resolveWaitForExit: (value: acp.WaitForTerminalExitResponse) => void = () => undefined;
-    const waitForExit = new Promise<acp.WaitForTerminalExitResponse>((resolve) => {
-      resolveWaitForExit = resolve;
-    });
+    let resolveWaitForExit: (value: acp.WaitForTerminalExitResponse) => void =
+      () => undefined;
+    const waitForExit = new Promise<acp.WaitForTerminalExitResponse>(
+      (resolve) => {
+        resolveWaitForExit = resolve;
+      }
+    );
 
     const terminal: ManagedTerminal = {
       id: terminalId,
@@ -912,7 +983,11 @@ export class AcpCliAdapter implements BridgeAdapter {
     };
     const onChunk = (chunk: string | Buffer) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      terminal.output = appendBoundedOutput(terminal.output, text, terminal.outputByteLimit);
+      terminal.output = appendBoundedOutput(
+        terminal.output,
+        text,
+        terminal.outputByteLimit
+      );
     };
     child.stdout.on("data", onChunk);
     child.stderr.on("data", onChunk);
@@ -948,7 +1023,10 @@ export class AcpCliAdapter implements BridgeAdapter {
     });
   }
 
-  private setStatus(status: BridgeAdapterState["status"], message?: string): void {
+  private setStatus(
+    status: BridgeAdapterState["status"],
+    message?: string
+  ): void {
     this.state.status = status;
     this.emit({
       type: "status",

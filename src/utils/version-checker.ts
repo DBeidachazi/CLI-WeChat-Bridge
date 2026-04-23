@@ -1,8 +1,11 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { CHANNEL_DATA_DIR, ensureChannelDataDir } from "../wechat/channel-config.ts";
 import { getConfiguredUpdateCheckHour } from "../config/bridge-config.ts";
+import {
+  CHANNEL_DATA_DIR,
+  ensureChannelDataDir,
+} from "../wechat/channel-config.ts";
 
 const UPDATE_CHECK_FILE = path.join(CHANNEL_DATA_DIR, "update-check.json");
 
@@ -13,13 +16,13 @@ export interface UpdateCheckCache {
 
 export interface VersionInfo {
   current: string;
-  latest: string;
   hasUpdate: boolean;
+  latest: string;
 }
 
 export function getLatestScheduledCheckTime(
   now: Date,
-  scheduleHour = getConfiguredUpdateCheckHour(),
+  scheduleHour = getConfiguredUpdateCheckHour()
 ): Date {
   const scheduled = new Date(now);
   scheduled.setHours(scheduleHour, 0, 0, 0);
@@ -35,10 +38,10 @@ export function getLatestScheduledCheckTime(
 export async function fetchLatestVersion(): Promise<string | null> {
   try {
     // 尝试使用 git ls-remote 获取所有 tags
-    const tagsOutput = execSync('git ls-remote --tags origin', {
+    const tagsOutput = execSync("git ls-remote --tags origin", {
       cwd: path.resolve(import.meta.dirname, "..", ".."),
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore']
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
     });
 
     if (!tagsOutput) {
@@ -47,14 +50,16 @@ export async function fetchLatestVersion(): Promise<string | null> {
 
     // 解析 tags，找到版本号格式（如 0.1.0, 0.2.0 等）
     const versionTags = tagsOutput
-      .split('\n')
-      .filter(line => {
+      .split("\n")
+      .filter((line) => {
         // 匹配 refs/tags/0.5.0 格式（不是 v0.5.0）
-        return line.includes('refs/tags/') &&
-               !line.includes('^{}') &&
-               /^\w+\s+refs\/tags\/\d+\.\d+\.\d+$/.test(line);
+        return (
+          line.includes("refs/tags/") &&
+          !line.includes("^{}") &&
+          /^\w+\s+refs\/tags\/\d+\.\d+\.\d+$/.test(line)
+        );
       })
-      .map(line => {
+      .map((line) => {
         const match = line.match(/refs\/tags\/(\d+\.\d+\.\d+)$/);
         return match ? match[1] : null;
       })
@@ -133,8 +138,12 @@ export function compareVersions(v1: string, v2: string): number {
     const num1 = parts1[i] || 0;
     const num2 = parts2[i] || 0;
 
-    if (num1 > num2) return 1;
-    if (num1 < num2) return -1;
+    if (num1 > num2) {
+      return 1;
+    }
+    if (num1 < num2) {
+      return -1;
+    }
   }
 
   return 0;
@@ -154,8 +163,13 @@ export async function checkForUpdate(
     const cache = readUpdateCache();
     if (cache) {
       const lastCheckTime = new Date(cache.lastCheck).getTime();
-      const currentWindowStart = getLatestScheduledCheckTime(new Date()).getTime();
-      if (Number.isFinite(lastCheckTime) && lastCheckTime >= currentWindowStart) {
+      const currentWindowStart = getLatestScheduledCheckTime(
+        new Date()
+      ).getTime();
+      if (
+        Number.isFinite(lastCheckTime) &&
+        lastCheckTime >= currentWindowStart
+      ) {
         return null;
       }
     }

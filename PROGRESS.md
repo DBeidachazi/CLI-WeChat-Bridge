@@ -32,7 +32,7 @@
 - Wired detached replacement-bridge stdout/stderr back into container stdout/stderr, so Gemini/Copilot replacement sessions now emit startup/transcript logs to `docker logs` as well.
 - Expanded `.gitignore` / `.dockerignore` to keep local auth, runtime state, `home/`, skills links, and editor files out of Git and Docker build context.
 - Added a GitHub Actions workflow that builds and pushes the Docker image to DockerHub on `main`, tags, or manual dispatch.
-- Upgraded the shared skills root from `.linkai/skills` to `.aiskill/skills`, while keeping `.linkai/skills -> .aiskill/skills` as a backward-compatible alias.
+- Kept `.linkai/skills` as the canonical shared skills root, while exposing `.aiskill/skills -> .linkai/skills` as a backward-compatible alias.
 - Added automatic generation of a shared `wechat-bridge-multimodal` skill so Codex, Gemini, and Copilot can discover WeChat multimodal input/output conventions from the shared skills directory.
 - Updated inbound WeChat prompt construction so the first turn now explicitly tells the model that the bridge supports multimodal WeChat input/output, voice transcripts, and `wechat-attachments` media replies.
 - Updated README and prompt-oriented tests to match the new shared skill layout and first-turn multimodal capability note.
@@ -48,11 +48,13 @@
   - `/model ...` now switches the bridge adapter layer
   - `/ai ...` now forwards slash commands into the active inner AI session, normalizing `/ai status` into `/status`
 - Allowed startup-time adapter switching from WeChat before a disconnected default Codex companion blocks ordinary prompt forwarding.
+- Reverted the two CRLF-polluted history entries (`781e9acbd00e9471af676a2c1e902bbb8880150e` and `5a57671c8449c16f00245fa4e0ef72fc9186815c`) with dedicated revert commits, then removed `.gitattributes` so line-ending policy is no longer enforced from the repo root.
 
 ## In Progress
 
 - Cleaning up remaining TypeScript/test drift that already existed in the repo alongside the new ACP changes.
 - Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
+- Initializing Ultracite so future repository hygiene is driven by a single shared toolchain instead of ad hoc line-ending enforcement.
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
   - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
   - confirm a bad outbound Gemini image candidate no longer poisons later text-only turns

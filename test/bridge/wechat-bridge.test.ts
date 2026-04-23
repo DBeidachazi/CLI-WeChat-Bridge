@@ -5,10 +5,10 @@ import {
   formatBridgeAttachmentLogEntry,
   formatBridgeTranscriptLogEntry,
   formatDeferredCodexInboundQueueMessage,
+  formatUserFacingBridgeFatalError,
   formatUserFacingInboundError,
   formatWechatSendFailureLogEntry,
   isRetryableDeferredCodexDrainError,
-  formatUserFacingBridgeFatalError,
   parseCliArgs,
   shouldDeferCodexInboundMessage,
   shouldForwardBridgeEventToWechat,
@@ -39,7 +39,7 @@ describe("wechat-bridge cli helpers", () => {
         startupParentPid: 123,
         attachedToTerminal: true,
         lifecycle: "persistent",
-      }),
+      })
     ).toBe(true);
   });
 
@@ -49,7 +49,7 @@ describe("wechat-bridge cli helpers", () => {
         startupParentPid: 123,
         attachedToTerminal: false,
         lifecycle: "companion_bound",
-      }),
+      })
     ).toBe(true);
   });
 
@@ -59,15 +59,15 @@ describe("wechat-bridge cli helpers", () => {
         startupParentPid: 123,
         attachedToTerminal: false,
         lifecycle: "persistent",
-      }),
+      })
     ).toBe(false);
   });
 
   test("formatUserFacingBridgeFatalError trims verbose app-server log details", () => {
     expect(
       formatUserFacingBridgeFatalError(
-        "codex app-server websocket closed unexpectedly. Recent app-server log: codex app-server (WebSockets) listening on: ws://127.0.0.1:12345 readyz: http://127.0.0.1:12345/readyz",
-      ),
+        "codex app-server websocket closed unexpectedly. Recent app-server log: codex app-server (WebSockets) listening on: ws://127.0.0.1:12345 readyz: http://127.0.0.1:12345/readyz"
+      )
     ).toBe("Bridge error: codex app-server websocket closed unexpectedly.");
   });
 
@@ -77,9 +77,9 @@ describe("wechat-bridge cli helpers", () => {
         context: "thread_switched",
         recipientId: "owner@im.wechat",
         error: new Error("HTTP 503: upstream unavailable"),
-      }),
+      })
     ).toBe(
-      "wechat_send_failed: context=thread_switched recipient=owner@im.wechat error=Error: HTTP 503: upstream unavailable",
+      "wechat_send_failed: context=thread_switched recipient=owner@im.wechat error=Error: HTTP 503: upstream unavailable"
     );
   });
 
@@ -89,10 +89,8 @@ describe("wechat-bridge cli helpers", () => {
         direction: "wechat->cli",
         label: "sender=owner@im.wechat",
         text: "hello\nworld",
-      }),
-    ).toBe(
-      "[transcript] wechat->cli sender=owner@im.wechat\n  hello\n  world",
-    );
+      })
+    ).toBe("[transcript] wechat->cli sender=owner@im.wechat\n  hello\n  world");
   });
 
   test("formatBridgeAttachmentLogEntry records recipient, kind, and file path", () => {
@@ -101,9 +99,9 @@ describe("wechat-bridge cli helpers", () => {
         recipientId: "owner@im.wechat",
         kind: "file",
         filePath: "/tmp/result.txt",
-      }),
+      })
     ).toBe(
-      "[transcript] cli->wechat attachment recipient=owner@im.wechat kind=file path=/tmp/result.txt",
+      "[transcript] cli->wechat attachment recipient=owner@im.wechat kind=file path=/tmp/result.txt"
     );
   });
 
@@ -115,9 +113,9 @@ describe("wechat-bridge cli helpers", () => {
         errorText:
           'opencode companion is not connected. Run "wechat-opencode" in a second terminal for this directory.',
         isUserFacingShellRejection: false,
-      }),
+      })
     ).toBe(
-      'OpenCode companion is not connected for bridge workspace:\nC:\\Users\\unlin\nRun "wechat-opencode" in that directory to reconnect the current local terminal, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.',
+      'OpenCode companion is not connected for bridge workspace:\nC:\\Users\\unlin\nRun "wechat-opencode" in that directory to reconnect the current local terminal, or run "wechat-bridge-opencode" and then "wechat-opencode" in your target project to replace this bridge.'
     );
   });
 
@@ -127,7 +125,7 @@ describe("wechat-bridge cli helpers", () => {
         adapter: "codex",
         errorText: "codex app-server websocket closed unexpectedly.",
         isUserFacingShellRejection: false,
-      }),
+      })
     ).toBe("Bridge error: codex app-server websocket closed unexpectedly.");
   });
 
@@ -138,19 +136,31 @@ describe("wechat-bridge cli helpers", () => {
     expect(
       shouldForwardBridgeEventToWechat("opencode", "notice", {
         text: "OpenCode is still working on:\nReview the bridge",
-      }),
+      })
     ).toBe(false);
     expect(
       shouldForwardBridgeEventToWechat("opencode", "notice", {
         text: "OpenCode local draft:\nReview the bridge",
-      }),
+      })
     ).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("opencode", "mirrored_user_input")).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("opencode", "session_switched")).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("opencode", "thread_switched")).toBe(false);
-    expect(shouldForwardBridgeEventToWechat("opencode", "final_reply")).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("opencode", "approval_required")).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("opencode", "fatal_error")).toBe(true);
+    expect(
+      shouldForwardBridgeEventToWechat("opencode", "mirrored_user_input")
+    ).toBe(true);
+    expect(
+      shouldForwardBridgeEventToWechat("opencode", "session_switched")
+    ).toBe(true);
+    expect(
+      shouldForwardBridgeEventToWechat("opencode", "thread_switched")
+    ).toBe(false);
+    expect(shouldForwardBridgeEventToWechat("opencode", "final_reply")).toBe(
+      true
+    );
+    expect(
+      shouldForwardBridgeEventToWechat("opencode", "approval_required")
+    ).toBe(true);
+    expect(shouldForwardBridgeEventToWechat("opencode", "fatal_error")).toBe(
+      true
+    );
   });
 
   test("keeps non-OpenCode adapters forwarding bridge events", () => {
@@ -167,7 +177,7 @@ describe("wechat-bridge cli helpers", () => {
         activeTurnOrigin: "local",
         hasPendingConfirmation: false,
         hasSystemCommand: false,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -179,7 +189,7 @@ describe("wechat-bridge cli helpers", () => {
         activeTurnOrigin: "wechat",
         hasPendingConfirmation: false,
         hasSystemCommand: false,
-      }),
+      })
     ).toBe(false);
     expect(
       shouldDeferCodexInboundMessage({
@@ -188,7 +198,7 @@ describe("wechat-bridge cli helpers", () => {
         activeTurnOrigin: "local",
         hasPendingConfirmation: false,
         hasSystemCommand: true,
-      }),
+      })
     ).toBe(false);
   });
 
@@ -200,7 +210,7 @@ describe("wechat-bridge cli helpers", () => {
         activeTurnOrigin: "local",
         hasPendingConfirmation: false,
         hasSystemCommand: false,
-      }),
+      })
     ).toBe(false);
   });
 
@@ -214,7 +224,7 @@ describe("wechat-bridge cli helpers", () => {
         hasPendingConfirmation: false,
         hasPendingApproval: false,
         hasActiveTask: false,
-      }),
+      })
     ).toBe(true);
 
     expect(
@@ -226,7 +236,7 @@ describe("wechat-bridge cli helpers", () => {
         hasPendingConfirmation: false,
         hasPendingApproval: false,
         hasActiveTask: false,
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -238,7 +248,7 @@ describe("wechat-bridge cli helpers", () => {
         hasPendingConfirmation: false,
         hasPendingApproval: false,
         hasActiveTask: false,
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -250,27 +260,29 @@ describe("wechat-bridge cli helpers", () => {
         hasPendingConfirmation: false,
         hasPendingApproval: false,
         hasActiveTask: true,
-      }),
+      })
     ).toBe(false);
   });
 
   test("formats the deferred Codex queue confirmation for WeChat", () => {
     expect(formatDeferredCodexInboundQueueMessage(2)).toBe(
-      "Queued for delivery after the current local Codex turn finishes. Queue position: 2.",
+      "Queued for delivery after the current local Codex turn finishes. Queue position: 2."
     );
   });
 
   test("retries deferred Codex drain failures only for transient local-busy conditions", () => {
     expect(
       isRetryableDeferredCodexDrainError(
-        "The local Codex panel is still working. Wait for the current reply or use /stop.",
-      ),
+        "The local Codex panel is still working. Wait for the current reply or use /stop."
+      )
     ).toBe(true);
     expect(
       isRetryableDeferredCodexDrainError(
-        "A Codex approval request is pending. Reply with /confirm <code> or /deny.",
-      ),
+        "A Codex approval request is pending. Reply with /confirm <code> or /deny."
+      )
     ).toBe(true);
-    expect(isRetryableDeferredCodexDrainError("codex panel is not running.")).toBe(false);
+    expect(
+      isRetryableDeferredCodexDrainError("codex panel is not running.")
+    ).toBe(false);
   });
 });

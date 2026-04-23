@@ -1,6 +1,5 @@
-import path from "node:path";
-
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 
 import {
   buildWorkspaceKey,
@@ -29,6 +28,8 @@ describe("workspace channel paths", () => {
 
     expect(pathsA.workspaceDir).not.toBe(pathsB.workspaceDir);
     expect(pathsA.stateFile.endsWith("bridge-state.json")).toBe(true);
-    expect(pathsA.endpointFile.endsWith("codex-panel-endpoint.json")).toBe(true);
+    expect(pathsA.endpointFile.endsWith("codex-panel-endpoint.json")).toBe(
+      true
+    );
   });
 });

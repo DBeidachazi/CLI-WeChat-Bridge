@@ -27,11 +27,14 @@ export type SystemCommand =
   | { type: "reset" }
   | { type: "help" }
   | { type: "ai_passthrough"; text: string }
-  | { type: "switch_model"; adapter: "gemini" | "codex" | "copilot" | "claude" | "opencode" | "shell" }
+  | {
+      type: "switch_model";
+      adapter: "gemini" | "codex" | "copilot" | "claude" | "opencode" | "shell";
+    }
   | { type: "confirm"; code?: string }
   | { type: "deny" };
 
-export const MESSAGE_START_GRACE_MS = 5_000;
+export const MESSAGE_START_GRACE_MS = 5000;
 const WECHAT_ATTACHMENT_SEND_INTENT_RE =
   /\b(send|upload|attach|forward|share)\b/i;
 const WECHAT_ATTACHMENT_SEND_INTENT_ZH_RE =
@@ -231,7 +234,9 @@ export function parseSystemCommand(text: string): SystemCommand | null {
     case "/status":
       return { type: "status" };
     case "/resume":
-      return argument ? { type: "resume", target: argument } : { type: "resume" };
+      return argument
+        ? { type: "resume", target: argument }
+        : { type: "resume" };
     case "/stop":
       return { type: "stop" };
     case "/new":
@@ -269,7 +274,7 @@ export function parseWechatControlCommand(
   options: {
     adapter: BridgeAdapterKind;
     hasPendingConfirmation: boolean;
-  },
+  }
 ): SystemCommand | null {
   const systemCommand = parseSystemCommand(text);
   if (systemCommand) {
@@ -341,7 +346,7 @@ export function buildWechatInboundPrompt(text: string): string {
 
 export function buildWechatInboundPromptWithAttachments(
   text: string,
-  attachments: BridgeInputAttachment[] = [],
+  attachments: BridgeInputAttachment[] = []
 ): string {
   const normalized = normalizeOutput(text).trim();
   if (!normalized && attachments.length === 0) {
@@ -359,7 +364,10 @@ export function buildWechatInboundPromptWithAttachments(
   sections.push("[User request]");
 
   const normalizedAttachments = attachments
-    .filter((attachment) => typeof attachment.path === "string" && attachment.path.trim())
+    .filter(
+      (attachment) =>
+        typeof attachment.path === "string" && attachment.path.trim()
+    )
     .map((attachment) => ({
       ...attachment,
       path: path.normalize(attachment.path.trim()),
@@ -368,7 +376,9 @@ export function buildWechatInboundPromptWithAttachments(
   if (normalized) {
     sections.push(normalized);
   } else {
-    sections.push("No plain-text body was included. Use the attached WeChat media as the primary user input.");
+    sections.push(
+      "No plain-text body was included. Use the attached WeChat media as the primary user input."
+    );
   }
 
   if (normalizedAttachments.length > 0) {
@@ -379,7 +389,7 @@ export function buildWechatInboundPromptWithAttachments(
 }
 
 export function buildWechatInboundAttachmentSection(
-  attachments: BridgeInputAttachment[],
+  attachments: BridgeInputAttachment[]
 ): string {
   const lines = ["[Inbound WeChat media]"];
   for (const attachment of attachments) {
@@ -448,7 +458,7 @@ export function parseWechatFinalReply(text: string): ParsedWechatFinalReply {
 }
 
 export function parseCodexSessionAgentMessage(
-  line: string,
+  line: string
 ): CodexSessionAgentMessage | null {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -476,7 +486,10 @@ export function parseCodexSessionAgentMessage(
 
   return {
     timestamp: parsed.timestamp,
-    phase: typeof parsed.payload.phase === "string" ? parsed.payload.phase : undefined,
+    phase:
+      typeof parsed.payload.phase === "string"
+        ? parsed.payload.phase
+        : undefined,
     message,
   };
 }
@@ -594,23 +607,33 @@ function normalizeShellExecutableToken(token: string): string {
   return path.parse(trimmed).name.toLowerCase();
 }
 
-function findCommandFlagIndex(args: string[], supportedFlags: string[]): number {
+function findCommandFlagIndex(
+  args: string[],
+  supportedFlags: string[]
+): number {
   return args.findIndex((arg) => supportedFlags.includes(arg.toLowerCase()));
 }
 
 function hasScriptLikeArg(args: string[]): boolean {
-  return args.some((arg) => Boolean(arg) && !arg.startsWith("-") && !arg.startsWith("/"));
+  return args.some(
+    (arg) => Boolean(arg) && !arg.startsWith("-") && !arg.startsWith("/")
+  );
 }
 
 function hasAnyCommandFlag(args: string[], supportedFlags: string[]): boolean {
   return findCommandFlagIndex(args, supportedFlags) >= 0;
 }
 
-function buildInteractiveShellCommandMessage(executable: string, suggestion: string): string {
+function buildInteractiveShellCommandMessage(
+  executable: string,
+  suggestion: string
+): string {
   return `Interactive command "${executable}" is not supported in shell mode yet. This shell bridge currently only supports non-interactive commands and scripts. ${suggestion}`;
 }
 
-export function getInteractiveShellCommandRejectionMessage(command: string): string | null {
+export function getInteractiveShellCommandRejectionMessage(
+  command: string
+): string | null {
   const tokens = tokenizeShellCommand(command);
   if (!tokens.length) {
     return null;
@@ -627,27 +650,29 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
   if (ALWAYS_INTERACTIVE_SHELL_COMMANDS.has(executable)) {
     return buildInteractiveShellCommandMessage(
       executable,
-      "Run a non-interactive command or script instead.",
+      "Run a non-interactive command or script instead."
     );
   }
 
   switch (executable) {
     case "python":
     case "python3":
-    case "py":
+    case "py": {
       if (!args.length) {
         return buildInteractiveShellCommandMessage(
           executable,
-          'Try "python script.py" or "python -c \\"...\\"" instead.',
+          'Try "python script.py" or "python -c \\"...\\"" instead.'
         );
       }
       if (lowerArgs.includes("-i") || lowerArgs.includes("--interactive")) {
         return buildInteractiveShellCommandMessage(
           executable,
-          'Try "python script.py" or "python -c \\"...\\"" instead.',
+          'Try "python script.py" or "python -c \\"...\\"" instead.'
         );
       }
-      if (hasAnyCommandFlag(lowerArgs, ["-c", "-h", "--help", "-v", "--version"])) {
+      if (
+        hasAnyCommandFlag(lowerArgs, ["-c", "-h", "--help", "-v", "--version"])
+      ) {
         return null;
       }
       const moduleFlagIndex = findCommandFlagIndex(lowerArgs, ["-m"]);
@@ -656,31 +681,47 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
           ? null
           : buildInteractiveShellCommandMessage(
               executable,
-              'Try "python script.py" or "python -m module_name" instead.',
+              'Try "python script.py" or "python -m module_name" instead.'
             );
       }
       return hasScriptLikeArg(args)
         ? null
         : buildInteractiveShellCommandMessage(
             executable,
-            'Try "python script.py" or "python -c \\"...\\"" instead.',
+            'Try "python script.py" or "python -c \\"...\\"" instead.'
           );
+    }
 
     case "node":
-      if (!args.length || lowerArgs.includes("-i") || lowerArgs.includes("--interactive")) {
+      if (
+        !args.length ||
+        lowerArgs.includes("-i") ||
+        lowerArgs.includes("--interactive")
+      ) {
         return buildInteractiveShellCommandMessage(
           executable,
-          'Try "node script.js" or "node -e \\"...\\"" instead.',
+          'Try "node script.js" or "node -e \\"...\\"" instead.'
         );
       }
-      if (hasAnyCommandFlag(lowerArgs, ["-e", "--eval", "-p", "--print", "-h", "--help", "-v", "--version"])) {
+      if (
+        hasAnyCommandFlag(lowerArgs, [
+          "-e",
+          "--eval",
+          "-p",
+          "--print",
+          "-h",
+          "--help",
+          "-v",
+          "--version",
+        ])
+      ) {
         return null;
       }
       return hasScriptLikeArg(args)
         ? null
         : buildInteractiveShellCommandMessage(
             executable,
-            'Try "node script.js" or "node -e \\"...\\"" instead.',
+            'Try "node script.js" or "node -e \\"...\\"" instead.'
           );
 
     case "cmd":
@@ -690,7 +731,7 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
       if (lowerArgs.includes("/k") || !lowerArgs.includes("/c")) {
         return buildInteractiveShellCommandMessage(
           executable,
-          'Try "cmd /c <command>" or run the command directly instead.',
+          'Try "cmd /c <command>" or run the command directly instead.'
         );
       }
       return null;
@@ -700,18 +741,27 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
       if (
         !args.length ||
         lowerArgs.includes("-noexit") ||
-        lowerArgs.includes("-nologo") && args.length === 1
+        (lowerArgs.includes("-nologo") && args.length === 1)
       ) {
         return buildInteractiveShellCommandMessage(
           executable,
-          `Try "${executable} -Command \\"...\\"" or "${executable} -File script.ps1" instead.`,
+          `Try "${executable} -Command \\"...\\"" or "${executable} -File script.ps1" instead.`
         );
       }
       if (
-        hasAnyCommandFlag(
-          lowerArgs,
-          ["-c", "-command", "-enc", "-encodedcommand", "-f", "-file", "-h", "-help", "-v", "-version", "-?"],
-        )
+        hasAnyCommandFlag(lowerArgs, [
+          "-c",
+          "-command",
+          "-enc",
+          "-encodedcommand",
+          "-f",
+          "-file",
+          "-h",
+          "-help",
+          "-v",
+          "-version",
+          "-?",
+        ])
       ) {
         return null;
       }
@@ -719,7 +769,7 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
         ? null
         : buildInteractiveShellCommandMessage(
             executable,
-            `Try "${executable} -Command \\"...\\"" or "${executable} -File script.ps1" instead.`,
+            `Try "${executable} -Command \\"...\\"" or "${executable} -File script.ps1" instead.`
           );
 
     case "bash":
@@ -730,7 +780,7 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
       if (!args.length || lowerArgs.includes("-i")) {
         return buildInteractiveShellCommandMessage(
           executable,
-          `Try "${executable} -c '...'" or "${executable} script.sh" instead.`,
+          `Try "${executable} -c '...'" or "${executable} script.sh" instead.`
         );
       }
       if (findCommandFlagIndex(lowerArgs, ["-c", "-lc"]) >= 0) {
@@ -743,7 +793,7 @@ export function getInteractiveShellCommandRejectionMessage(command: string): str
         ? null
         : buildInteractiveShellCommandMessage(
             executable,
-            `Try "${executable} -c '...'" or "${executable} script.sh" instead.`,
+            `Try "${executable} -c '...'" or "${executable} script.sh" instead.`
           );
 
     default:
@@ -763,13 +813,21 @@ export function detectCliApproval(text: string): ApprovalRequest | null {
     confirmInput?: string;
     denyInput?: string;
   }> = [
-    { pattern: /\bdo you want to allow\b/i, confirmInput: "y\r", denyInput: "n\r" },
+    {
+      pattern: /\bdo you want to allow\b/i,
+      confirmInput: "y\r",
+      denyInput: "n\r",
+    },
     { pattern: /\bapprove\b/i, confirmInput: "y\r", denyInput: "n\r" },
     { pattern: /\ballow this\b/i, confirmInput: "y\r", denyInput: "n\r" },
     { pattern: /\b\(y\/n\)\b/i, confirmInput: "y\r", denyInput: "n\r" },
     { pattern: /\byes\/no\b/i, confirmInput: "yes\r", denyInput: "no\r" },
     { pattern: /\bpress enter to continue\b/i, confirmInput: "\r" },
-    { pattern: /\bconfirm to continue\b/i, confirmInput: "y\r", denyInput: "n\r" },
+    {
+      pattern: /\bconfirm to continue\b/i,
+      confirmInput: "y\r",
+      denyInput: "n\r",
+    },
   ];
 
   const matched = approvalPatterns.find(({ pattern }) => pattern.test(compact));
@@ -823,7 +881,7 @@ export function summarizeOutput(text: string, maxLength = 280): string {
 
 export function formatStatusReport(
   bridgeState: BridgeState,
-  adapterState: BridgeAdapterState,
+  adapterState: BridgeAdapterState
 ): string {
   const pending = bridgeState.pendingConfirmation;
   const persistedSharedSessionId =
@@ -962,13 +1020,20 @@ export function formatResumeSessionList(params: {
         : "No saved sessions were found for this working directory.";
   }
 
-  const title = adapter === "codex" ? "Recent Codex threads:" : adapter === "opencode" ? "Recent OpenCode sessions:" : "Recent sessions:";
+  const title =
+    adapter === "codex"
+      ? "Recent Codex threads:"
+      : adapter === "opencode"
+        ? "Recent OpenCode sessions:"
+        : "Recent sessions:";
   const resumeTargetLabel = adapter === "codex" ? "threadId" : "sessionId";
   return [
     title,
     ...candidates.map((candidate, index) => {
       const marker =
-        currentSessionId && candidate.sessionId === currentSessionId ? " [current]" : "";
+        currentSessionId && candidate.sessionId === currentSessionId
+          ? " [current]"
+          : "";
       return `${index + 1}. ${candidate.title} (${candidate.lastUpdatedAt}, ${candidate.sessionId.slice(0, 12)})${marker}`;
     }),
     `Reply with /resume <number> or /resume <${resumeTargetLabel}>.`,
@@ -977,7 +1042,7 @@ export function formatResumeSessionList(params: {
 
 export function formatResumeThreadList(
   candidates: BridgeResumeThreadCandidate[],
-  currentThreadId?: string,
+  currentThreadId?: string
 ): string {
   return formatResumeSessionList({
     adapter: "codex",
@@ -992,7 +1057,7 @@ export function formatResumeThreadList(
 
 export function formatMirroredUserInputMessage(
   adapter: BridgeAdapterKind,
-  text: string,
+  text: string
 ): string {
   const label =
     adapter === "codex"
@@ -1005,13 +1070,13 @@ export function formatMirroredUserInputMessage(
             ? "Local Gemini input"
             : adapter === "copilot"
               ? "Local Copilot input"
-          : "Local input";
+              : "Local input";
   return `${label}:\n${truncatePreview(text, 500)}`;
 }
 
 export function formatFinalReplyMessage(
   adapter: BridgeAdapterKind,
-  text: string,
+  text: string
 ): string {
   if (
     adapter === "claude" ||
@@ -1053,7 +1118,7 @@ const OPENCODE_REASONING_LINE_RES = [
 
 export function sanitizeWechatFinalReplyText(
   adapter: BridgeAdapterKind,
-  text: string,
+  text: string
 ): string {
   const normalized = cleanupVisibleWechatReplyText(text);
   if (!normalized || adapter !== "opencode") {
@@ -1097,7 +1162,8 @@ export function sanitizeWechatFinalReplyText(
       continue;
     }
 
-    const previousLine = keptLines.length > 0 ? keptLines[keptLines.length - 1] : undefined;
+    const previousLine =
+      keptLines.length > 0 ? keptLines[keptLines.length - 1] : undefined;
     if (
       previousLine &&
       previousLine.trim() &&
@@ -1114,7 +1180,9 @@ export function sanitizeWechatFinalReplyText(
     return cleaned;
   }
 
-  const tail = cleanupVisibleWechatReplyText(keptLines.slice(tailStartIndex).join("\n"));
+  const tail = cleanupVisibleWechatReplyText(
+    keptLines.slice(tailStartIndex).join("\n")
+  );
   return tail || cleaned;
 }
 
@@ -1147,22 +1215,22 @@ function extractInlineWechatAttachments(text: string): ParsedWechatFinalReply {
     return true;
   };
 
-  visibleText = visibleText.replace(INLINE_MAAS_URL_RE, (fullMatch, candidatePath) => {
-    return rememberAttachment(candidatePath) ? "" : fullMatch;
-  });
+  visibleText = visibleText.replace(
+    INLINE_MAAS_URL_RE,
+    (fullMatch, candidatePath) =>
+      rememberAttachment(candidatePath) ? "" : fullMatch
+  );
 
   visibleText = visibleText.replace(
     INLINE_WINDOWS_PATH_RE,
-    (fullMatch, prefix, candidatePath) => {
-      return rememberAttachment(candidatePath) ? prefix : fullMatch;
-    },
+    (fullMatch, prefix, candidatePath) =>
+      rememberAttachment(candidatePath) ? prefix : fullMatch
   );
 
   visibleText = visibleText.replace(
     INLINE_HOME_RELATIVE_PATH_RE,
-    (fullMatch, prefix, candidatePath) => {
-      return rememberAttachment(candidatePath) ? prefix : fullMatch;
-    },
+    (fullMatch, prefix, candidatePath) =>
+      rememberAttachment(candidatePath) ? prefix : fullMatch
   );
 
   return {
@@ -1183,7 +1251,7 @@ function resolveWechatAttachmentPath(candidatePath: string): string | null {
 
   const homeRelativeMatch =
     /^(?:~[\\/])?(Desktop|Documents|Downloads|Pictures|Videos|Music)([\\/].+)?$/i.exec(
-      normalizedCandidate,
+      normalizedCandidate
     );
   if (!homeRelativeMatch) {
     return null;
@@ -1206,7 +1274,9 @@ function normalizeWechatAttachmentCandidate(candidatePath: string): string {
     .replace(/[\\/]+/g, path.sep);
 }
 
-function inferInlineWechatAttachmentKind(filePath: string): WechatAttachmentKind | null {
+function inferInlineWechatAttachmentKind(
+  filePath: string
+): WechatAttachmentKind | null {
   const extension = path.extname(filePath).toLowerCase();
   if (INLINE_IMAGE_EXTENSIONS.has(extension)) {
     return "image";
@@ -1238,7 +1308,7 @@ function cleanupVisibleWechatReplyText(text: string): string {
 
 export function formatTaskFailedMessage(
   adapter: BridgeAdapterKind,
-  text: string,
+  text: string
 ): string {
   const label =
     adapter === "codex"
@@ -1257,7 +1327,7 @@ export function formatTaskFailedMessage(
 
 export function formatApprovalMessage(
   pending: PendingApproval,
-  adapterState: BridgeAdapterState,
+  adapterState: BridgeAdapterState
 ): string {
   const isClaude = adapterState.kind === "claude";
   if (isClaude) {
@@ -1286,7 +1356,7 @@ export function formatApprovalMessage(
 
 export function formatPendingApprovalReminder(
   pending: PendingApproval,
-  adapterState: BridgeAdapterState,
+  adapterState: BridgeAdapterState
 ): string {
   if (adapterState.kind === "claude") {
     const target = pending.toolName
@@ -1309,8 +1379,8 @@ export class OutputBatcher {
 
   constructor(
     onFlush: (text: string) => Promise<void> | void,
-    flushIntervalMs = 1_000,
-    maxChars = 1_200,
+    flushIntervalMs = 1000,
+    maxChars = 1200
   ) {
     this.onFlush = onFlush;
     this.flushIntervalMs = flushIntervalMs;
@@ -1324,7 +1394,7 @@ export class OutputBatcher {
     }
 
     this.buffer += normalized;
-    this.recentText = (this.recentText + normalized).slice(-6_000);
+    this.recentText = (this.recentText + normalized).slice(-6000);
 
     while (this.buffer.length >= this.maxChars) {
       const nextChunk = this.buffer.slice(0, this.maxChars);
@@ -1391,7 +1461,7 @@ export class OutputBatcher {
 export function shouldDropStartupBacklogMessage(
   createdAtMs: number | undefined,
   bridgeStartedAtMs: number,
-  graceMs = MESSAGE_START_GRACE_MS,
+  graceMs = MESSAGE_START_GRACE_MS
 ): boolean {
   if (!Number.isFinite(createdAtMs)) {
     return true;

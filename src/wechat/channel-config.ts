@@ -13,33 +13,37 @@ export const DEFAULT_BASE_URL =
   process.env.WECHAT_ILINK_BASE_URL?.trim() || "https://ilinkai.weixin.qq.com";
 export const BOT_TYPE = "3";
 
-export const CHANNEL_DATA_DIR = process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR?.trim()
-  ? path.resolve(process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR.trim())
-  : path.join(os.homedir(), ".claude", "channels", "wechat");
+export const CHANNEL_DATA_DIR =
+  process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR?.trim()
+    ? path.resolve(process.env.CLAUDE_WECHAT_CHANNEL_DATA_DIR.trim())
+    : path.join(os.homedir(), ".claude", "channels", "wechat");
 export const GLOBAL_CHANNEL_DATA_DIR = path.join(
   os.homedir(),
   ".claude",
   "channels",
-  "wechat",
+  "wechat"
 );
 
 export const CREDENTIALS_FILE = path.join(CHANNEL_DATA_DIR, "account.json");
 export const SYNC_BUF_FILE = path.join(CHANNEL_DATA_DIR, "sync_buf.txt");
 export const CONTEXT_CACHE_FILE = path.join(
   CHANNEL_DATA_DIR,
-  "context_tokens.json",
+  "context_tokens.json"
 );
-export const BRIDGE_STATE_FILE = path.join(CHANNEL_DATA_DIR, "bridge-state.json");
+export const BRIDGE_STATE_FILE = path.join(
+  CHANNEL_DATA_DIR,
+  "bridge-state.json"
+);
 export const BRIDGE_LOG_FILE = path.join(CHANNEL_DATA_DIR, "bridge.log");
 export const BRIDGE_LOCK_FILE = path.join(CHANNEL_DATA_DIR, "bridge.lock.json");
 export const CODEX_PANEL_ENDPOINT_FILE = path.join(
   CHANNEL_DATA_DIR,
-  "codex-panel-endpoint.json",
+  "codex-panel-endpoint.json"
 );
 export const WORKSPACES_DIR = path.join(CHANNEL_DATA_DIR, "workspaces");
 export const INBOUND_MESSAGE_CLAIMS_DIR = path.join(
   GLOBAL_CHANNEL_DATA_DIR,
-  "inbound-message-claims",
+  "inbound-message-claims"
 );
 
 export type WorkspaceChannelPaths = {
@@ -53,9 +57,12 @@ const LEGACY_CHANNEL_DATA_DIR = path.join(
   "~",
   ".claude",
   "channels",
-  "wechat",
+  "wechat"
 );
-const LEGACY_CREDENTIALS_FILE = path.join(LEGACY_CHANNEL_DATA_DIR, "account.json");
+const LEGACY_CREDENTIALS_FILE = path.join(
+  LEGACY_CHANNEL_DATA_DIR,
+  "account.json"
+);
 const LEGACY_SYNC_BUF_FILE = path.join(LEGACY_CHANNEL_DATA_DIR, "sync_buf.txt");
 
 export function ensureChannelDataDir(): void {
@@ -107,13 +114,15 @@ export function ensureWorkspaceChannelDir(cwd: string): WorkspaceChannelPaths {
 }
 
 export function migrateLegacyChannelFiles(
-  log?: (message: string) => void,
+  log?: (message: string) => void
 ): string[] {
   const migrated: string[] = [];
 
   if (
-    !fs.existsSync(LEGACY_CREDENTIALS_FILE) &&
-    !fs.existsSync(LEGACY_SYNC_BUF_FILE)
+    !(
+      fs.existsSync(LEGACY_CREDENTIALS_FILE) ||
+      fs.existsSync(LEGACY_SYNC_BUF_FILE)
+    )
   ) {
     return migrated;
   }
@@ -134,8 +143,8 @@ export function migrateLegacyChannelFiles(
   if (migrated.length && log) {
     log(
       `Migrated legacy ${migrated.join(
-        " and ",
-      )} from ${LEGACY_CHANNEL_DATA_DIR} to ${CHANNEL_DATA_DIR}.`,
+        " and "
+      )} from ${LEGACY_CHANNEL_DATA_DIR} to ${CHANNEL_DATA_DIR}.`
     );
   }
 

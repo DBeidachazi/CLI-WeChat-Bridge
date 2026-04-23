@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Standalone WeChat + Claude bot.
  *
@@ -9,9 +10,9 @@
  *   bun run src/wechat/standalone-bot.ts
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
-import crypto from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 
 // Types
@@ -33,31 +34,31 @@ interface RefMessage {
 }
 
 interface MessageItem {
-  type?: number;
-  text_item?: TextItem;
-  voice_item?: { text?: string };
   ref_msg?: RefMessage;
+  text_item?: TextItem;
+  type?: number;
+  voice_item?: { text?: string };
 }
 
 interface WeixinMessage {
-  from_user_id?: string;
-  to_user_id?: string;
   client_id?: string;
-  session_id?: string;
-  message_type?: number;
-  message_state?: number;
-  item_list?: MessageItem[];
   context_token?: string;
   create_time_ms?: number;
+  from_user_id?: string;
+  item_list?: MessageItem[];
+  message_state?: number;
+  message_type?: number;
+  session_id?: string;
+  to_user_id?: string;
 }
 
 interface GetUpdatesResp {
-  ret?: number;
   errcode?: number;
   errmsg?: string;
-  msgs?: WeixinMessage[];
   get_updates_buf?: string;
   longpolling_timeout_ms?: number;
+  msgs?: WeixinMessage[];
+  ret?: number;
 }
 
 // Constants
@@ -75,7 +76,10 @@ const MSG_ITEM_VOICE = 3;
 const MSG_STATE_FINISH = 2;
 
 // Conversation history per user
-const conversationHistory = new Map<string, Array<{role: string, content: string}>>();
+const conversationHistory = new Map<
+  string,
+  Array<{ role: string; content: string }>
+>();
 const MAX_HISTORY = 10;
 
 // Logging
@@ -134,7 +138,9 @@ async function apiFetch(params: {
   token?: string;
   timeoutMs: number;
 }): Promise<string> {
-  const base = params.baseUrl.endsWith("/") ? params.baseUrl : `${params.baseUrl}/`;
+  const base = params.baseUrl.endsWith("/")
+    ? params.baseUrl
+    : `${params.baseUrl}/`;
   const url = new URL(params.endpoint, base).toString();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
@@ -162,7 +168,7 @@ async function apiFetch(params: {
 async function getUpdates(
   baseUrl: string,
   token: string,
-  getUpdatesBuf: string,
+  getUpdatesBuf: string
 ): Promise<GetUpdatesResp> {
   try {
     const raw = await apiFetch({
@@ -219,7 +225,7 @@ async function sendTextMessage(
   token: string,
   to: string,
   text: string,
-  contextToken: string,
+  contextToken: string
 ): Promise<string> {
   const trimmedText = text.trim();
   if (!trimmedText) {
@@ -289,7 +295,7 @@ function initClaude(): boolean {
 
   anthropic = new Anthropic({
     apiKey: "dummy-key", // 代理不需要真实的 API key
-    baseURL: baseURL,
+    baseURL,
     dangerouslyAllowBrowser: true, // 允许在非标准环境下使用
   });
 
@@ -299,7 +305,7 @@ function initClaude(): boolean {
 
 async function getClaudeResponse(
   userMessage: string,
-  userId: string,
+  userId: string
 ): Promise<string> {
   if (!anthropic) {
     throw new Error("Claude API not initialized");
@@ -320,7 +326,8 @@ async function getClaudeResponse(
     const msg = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
-      system: "你是一个有帮助的AI助手。请用简洁、友好的方式回复，适合微信聊天场景。",
+      system:
+        "你是一个有帮助的AI助手。请用简洁、友好的方式回复，适合微信聊天场景。",
       messages: history as any,
     });
 
@@ -375,7 +382,7 @@ async function startPolling(account: AccountData): Promise<never> {
 
       if (isError) {
         logError(
-          `getUpdates failed: ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""}`,
+          `getUpdates failed: ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""}`
         );
         await new Promise((resolve) => setTimeout(resolve, 2000));
         continue;
@@ -414,15 +421,25 @@ async function startPolling(account: AccountData): Promise<never> {
           contextTokenCache.set(senderId, msg.context_token);
         }
 
-        log(`📨 收到消息 from ${senderId}: ${text.slice(0, 50)}${text.length > 50 ? "..." : ""}`);
+        log(
+          `📨 收到消息 from ${senderId}: ${text.slice(0, 50)}${text.length > 50 ? "..." : ""}`
+        );
 
         // Get response from Claude
         try {
           const response = await getClaudeResponse(text, senderId);
-          log(`📤 发送回复 to ${senderId}: ${response.slice(0, 50)}${response.length > 50 ? "..." : ""}`);
+          log(
+            `📤 发送回复 to ${senderId}: ${response.slice(0, 50)}${response.length > 50 ? "..." : ""}`
+          );
 
           const contextToken = contextTokenCache.get(senderId) || "";
-          await sendTextMessage(baseUrl, token, senderId, response, contextToken);
+          await sendTextMessage(
+            baseUrl,
+            token,
+            senderId,
+            response,
+            contextToken
+          );
         } catch (err) {
           logError(`Failed to get/send response: ${String(err)}`);
           // Send error message to user
@@ -433,7 +450,7 @@ async function startPolling(account: AccountData): Promise<never> {
               token,
               senderId,
               "抱歉，我遇到了一些问题，请稍后再试。",
-              contextToken,
+              contextToken
             );
           } catch {
             // Ignore
@@ -456,7 +473,7 @@ async function main() {
   log(`正在加载微信凭据: ${CREDENTIALS_FILE}`);
   const account = loadCredentials();
   if (!account) {
-  logError("无法加载微信凭据，请先运行: bun run setup");
+    logError("无法加载微信凭据，请先运行: bun run setup");
     process.exit(1);
   }
   log(`✓ 微信账号: ${account.accountId}`);

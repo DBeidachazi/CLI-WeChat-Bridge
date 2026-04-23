@@ -76,7 +76,7 @@ export function parseClaudeHookPayload(raw: string): ClaudeHookPayload | null {
 }
 
 export function extractClaudeResumeConversationId(
-  transcriptPath: string | undefined,
+  transcriptPath: string | undefined
 ): string | null {
   if (typeof transcriptPath !== "string") {
     return null;
@@ -97,7 +97,9 @@ export function extractClaudeResumeConversationId(
   return conversationId || null;
 }
 
-export function buildClaudeHookSettings(command: string): Record<string, unknown> {
+export function buildClaudeHookSettings(
+  command: string
+): Record<string, unknown> {
   const hook = {
     hooks: [
       {
@@ -162,17 +164,18 @@ function summarizeClaudePlan(plan: string): string {
     .trim();
   const description = lines.find(
     (line) =>
-      !/^#+\s+/.test(line) &&
-      !/^[-*]\s+/.test(line) &&
-      !/^\d+\.\s+/.test(line),
+      !(/^#+\s+/.test(line) || /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line))
   );
 
-  return truncatePreview([heading, description].filter(Boolean).join(" - ") || lines[0], 180);
+  return truncatePreview(
+    [heading, description].filter(Boolean).join(" - ") || lines[0],
+    180
+  );
 }
 
 function summarizeClaudeToolInput(
   toolName: string,
-  toolInput: Record<string, unknown> | undefined,
+  toolInput: Record<string, unknown> | undefined
 ): {
   detailLabel: string;
   detailPreview: string;
@@ -226,13 +229,16 @@ function summarizeClaudeToolInput(
 }
 
 export function buildClaudePermissionApprovalRequest(
-  payload: ClaudeHookPayload,
+  payload: ClaudeHookPayload
 ): ApprovalRequest {
   const toolName =
     typeof payload.tool_name === "string" && payload.tool_name.trim()
       ? payload.tool_name.trim()
       : "Tool";
-  const { detailLabel, detailPreview } = summarizeClaudeToolInput(toolName, payload.tool_input);
+  const { detailLabel, detailPreview } = summarizeClaudeToolInput(
+    toolName,
+    payload.tool_input
+  );
 
   return {
     source: "cli",
@@ -245,7 +251,7 @@ export function buildClaudePermissionApprovalRequest(
 }
 
 export function buildClaudePermissionDecisionHookOutput(
-  action: ClaudePermissionDecisionAction,
+  action: ClaudePermissionDecisionAction
 ): string {
   const decision =
     action === "confirm"
@@ -266,7 +272,9 @@ export function buildClaudePermissionDecisionHookOutput(
   });
 }
 
-export function extractClaudeAssistantMessageText(payload: ClaudeHookPayload): string {
+export function extractClaudeAssistantMessageText(
+  payload: ClaudeHookPayload
+): string {
   return typeof payload.last_assistant_message === "string"
     ? normalizeOutput(payload.last_assistant_message).trim()
     : "";
@@ -277,28 +285,29 @@ function extractClaudeAssistantContentText(content: unknown): string {
     return "";
   }
 
-  const parts = content
-    .flatMap((item) => {
-      if (!item || typeof item !== "object") {
-        return [];
-      }
+  const parts = content.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
 
-      const candidate = item as {
-        type?: string;
-        text?: string;
-      };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") {
-        return [];
-      }
+    const candidate = item as {
+      type?: string;
+      text?: string;
+    };
+    if (candidate.type !== "text" || typeof candidate.text !== "string") {
+      return [];
+    }
 
-      const text = normalizeOutput(candidate.text).trim();
-      return text ? [text] : [];
-    });
+    const text = normalizeOutput(candidate.text).trim();
+    return text ? [text] : [];
+  });
 
   return parts.join("\n\n").trim();
 }
 
-export function extractClaudeTranscriptFinalReply(rawTranscript: string): string | null {
+export function extractClaudeTranscriptFinalReply(
+  rawTranscript: string
+): string | null {
   const lines = rawTranscript.split(/\r?\n/);
   let fallbackText: string | null = null;
 
@@ -319,7 +328,11 @@ export function extractClaudeTranscriptFinalReply(rawTranscript: string): string
       continue;
     }
 
-    if (parsed.type !== "assistant" || !parsed.message || parsed.message.role !== "assistant") {
+    if (
+      parsed.type !== "assistant" ||
+      !parsed.message ||
+      parsed.message.role !== "assistant"
+    ) {
       continue;
     }
 
@@ -338,7 +351,9 @@ export function extractClaudeTranscriptFinalReply(rawTranscript: string): string
   return fallbackText;
 }
 
-export function normalizeClaudeAssistantMessage(payload: ClaudeHookPayload): string {
+export function normalizeClaudeAssistantMessage(
+  payload: ClaudeHookPayload
+): string {
   return extractClaudeAssistantMessageText(payload) || "(no final reply)";
 }
 
@@ -353,14 +368,17 @@ export function buildClaudeFailureMessage(payload: ClaudeHookPayload): string {
     typeof payload.error === "string" ? payload.error.trim() : "",
   ].filter(Boolean);
 
-  return truncatePreview(details.join(" | ") || "Claude reported an unknown error.", 500);
+  return truncatePreview(
+    details.join(" | ") || "Claude reported an unknown error.",
+    500
+  );
 }
 
 export function findInjectedClaudePromptIndex(
   prompt: string,
   pendingInputs: PendingInjectedClaudePrompt[],
   nowMs = Date.now(),
-  maxAgeMs = 15_000,
+  maxAgeMs = 15_000
 ): number {
   const normalizedPrompt = normalizeOutput(prompt).trim();
   if (!normalizedPrompt) {

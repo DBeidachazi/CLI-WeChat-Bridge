@@ -1,32 +1,34 @@
 #!/usr/bin/env node
 
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
 import {
-  BRIDGE_LOG_FILE,
-  CREDENTIALS_FILE,
-  buildWorkspaceKey,
-  migrateLegacyChannelFiles,
-} from "../wechat/channel-config.ts";
-import {
+  type BridgeLockPayload,
   readBridgeLockFile,
   shouldAutoReclaimBridgeLock,
-  type BridgeLockPayload,
 } from "../bridge/bridge-state.ts";
-import {
-  clearLocalCompanionEndpoint,
-  readLocalCompanionEndpoint,
-  type LocalCompanionEndpoint,
-} from "./local-companion-link.ts";
-import type { BridgeAdapterKind, BridgeLifecycleMode } from "../bridge/bridge-types.ts";
+import type {
+  BridgeAdapterKind,
+  BridgeLifecycleMode,
+} from "../bridge/bridge-types.ts";
 import {
   getConfiguredTmuxSessionPrefix,
   shouldMirrorBackgroundBridgeLogsToContainer,
 } from "../config/bridge-config.ts";
+import {
+  BRIDGE_LOG_FILE,
+  buildWorkspaceKey,
+  CREDENTIALS_FILE,
+  migrateLegacyChannelFiles,
+} from "../wechat/channel-config.ts";
+import {
+  clearLocalCompanionEndpoint,
+  type LocalCompanionEndpoint,
+  readLocalCompanionEndpoint,
+} from "./local-companion-link.ts";
 
 type LocalCompanionLaunchAdapter = Exclude<BridgeAdapterKind, "shell">;
 
@@ -114,13 +116,18 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
           "Starts or reuses a Codex, Claude, OpenCode, Gemini, or Copilot bridge for the current directory, waits for the local endpoint, then opens the visible companion or panel.",
           "tmux-backed launches keep the bridge persistent until another start command replaces it; direct foreground launches stay companion-bound.",
           "",
-        ].join("\n"),
+        ].join("\n")
       );
       process.exit(0);
     }
 
     if (arg === "--adapter") {
-      if (!next || !["codex", "claude", "opencode", "gemini", "copilot"].includes(next)) {
+      if (
+        !(
+          next &&
+          ["codex", "claude", "opencode", "gemini", "copilot"].includes(next)
+        )
+      ) {
         throw new Error(`Invalid adapter: ${next ?? "(missing)"}`);
       }
       adapter = next as LocalCompanionLaunchAdapter;
@@ -178,7 +185,10 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!isPidAlive(pid)) {
@@ -191,7 +201,7 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
 
 async function stopExistingBridge(
   lock: BridgeLockPayload,
-  requestedAdapter: LocalCompanionLaunchAdapter,
+  requestedAdapter: LocalCompanionLaunchAdapter
 ): Promise<void> {
   const { pid, cwd } = lock;
   log(requestedAdapter, `Stopping existing bridge for ${cwd} (pid=${pid})...`);
@@ -206,17 +216,21 @@ async function stopExistingBridge(
   }
 
   if (!(await waitForProcessExit(pid, 10_000))) {
-    throw new Error(`Timed out waiting for existing bridge pid=${pid} to exit.`);
+    throw new Error(
+      `Timed out waiting for existing bridge pid=${pid} to exit.`
+    );
   }
 
   clearLocalCompanionEndpoint(cwd);
   log(
     requestedAdapter,
-    `Cleared stale local companion endpoint for previous workspace ${cwd}.`,
+    `Cleared stale local companion endpoint for previous workspace ${cwd}.`
   );
 }
 
-async function isEndpointReachable(endpoint: LocalCompanionEndpoint): Promise<boolean> {
+async function isEndpointReachable(
+  endpoint: LocalCompanionEndpoint
+): Promise<boolean> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   return await new Promise<boolean>((resolve) => {
@@ -245,7 +259,7 @@ async function isEndpointReachable(endpoint: LocalCompanionEndpoint): Promise<bo
 
 async function readUsableEndpoint(
   cwd: string,
-  adapter: LocalCompanionLaunchAdapter,
+  adapter: LocalCompanionLaunchAdapter
 ): Promise<EndpointReadResult> {
   const endpoint = readLocalCompanionEndpoint(cwd);
   if (!endpoint || endpoint.kind !== adapter) {
@@ -264,7 +278,7 @@ async function readUsableEndpoint(
 export function buildBackgroundBridgeArgs(
   entryPath: string,
   options: LocalCompanionStartCliOptions,
-  lifecycle: BridgeLifecycleMode = "companion_bound",
+  lifecycle: BridgeLifecycleMode = "companion_bound"
 ): string[] {
   const args = [
     "--no-warnings",
@@ -286,14 +300,14 @@ export function buildBackgroundBridgeArgs(
 }
 
 export function resolveForegroundClientEntryPath(
-  _adapter: LocalCompanionLaunchAdapter,
+  _adapter: LocalCompanionLaunchAdapter
 ): string {
   return path.resolve(MODULE_DIR, "local-companion.ts");
 }
 
 export function buildForegroundClientArgs(
   entryPath: string,
-  options: LocalCompanionStartCliOptions,
+  options: LocalCompanionStartCliOptions
 ): string[] {
   return [
     "--no-warnings",
@@ -311,7 +325,7 @@ function quotePosixArg(value: string): string {
 }
 
 function buildForegroundClientCommandLine(
-  options: LocalCompanionStartCliOptions,
+  options: LocalCompanionStartCliOptions
 ): string {
   const entryPath = resolveForegroundClientEntryPath(options.adapter);
   const args = buildForegroundClientArgs(entryPath, options);
@@ -319,7 +333,7 @@ function buildForegroundClientCommandLine(
 }
 
 export function buildTmuxSessionName(
-  options: LocalCompanionStartCliOptions,
+  options: LocalCompanionStartCliOptions
 ): string {
   return `${getConfiguredTmuxSessionPrefix()}-${options.adapter}-${buildWorkspaceKey(options.cwd)}`;
 }
@@ -333,7 +347,10 @@ function isTmuxAvailable(): boolean {
   );
 }
 
-function tmuxCommand(args: string[], options: { stdio?: "ignore" | "inherit" } = {}): number {
+function tmuxCommand(
+  args: string[],
+  options: { stdio?: "ignore" | "inherit" } = {}
+): number {
   const result = spawnSync("tmux", args, {
     cwd: process.cwd(),
     stdio: options.stdio ?? "ignore",
@@ -363,28 +380,35 @@ function ensureSharedWechatSkill(sharedSkillsDir: string): void {
 function ensureSharedSkillAlias(
   cwd: string,
   adapter: LocalCompanionLaunchAdapter,
-  sharedSkillsDir: string,
+  sharedSkillsDir: string
 ): void {
-  const aliasPath = path.join(cwd, LEGACY_SHARED_SKILLS_ROOT, SHARED_SKILLS_DIRNAME);
+  const aliasPath = path.join(
+    cwd,
+    LEGACY_SHARED_SKILLS_ROOT,
+    SHARED_SKILLS_DIRNAME
+  );
   fs.mkdirSync(path.dirname(aliasPath), { recursive: true });
 
   try {
     const stat = fs.lstatSync(aliasPath);
     if (stat.isSymbolicLink()) {
-      const target = path.resolve(path.dirname(aliasPath), fs.readlinkSync(aliasPath));
+      const target = path.resolve(
+        path.dirname(aliasPath),
+        fs.readlinkSync(aliasPath)
+      );
       if (target === sharedSkillsDir) {
         return;
       }
     } else if (stat.isDirectory()) {
       log(
         adapter,
-        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a real directory already exists.`,
+        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a real directory already exists.`
       );
       return;
     } else {
       log(
         adapter,
-        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a non-directory path already exists.`,
+        `Skipping legacy skills alias for ${LEGACY_SHARED_SKILLS_ROOT}/${SHARED_SKILLS_DIRNAME} because a non-directory path already exists.`
       );
       return;
     }
@@ -397,11 +421,22 @@ function ensureSharedSkillAlias(
   } catch {
     // Best effort cleanup.
   }
-  fs.symlinkSync(path.relative(path.dirname(aliasPath), sharedSkillsDir), aliasPath, "dir");
+  fs.symlinkSync(
+    path.relative(path.dirname(aliasPath), sharedSkillsDir),
+    aliasPath,
+    "dir"
+  );
 }
 
-function ensureSkillSyncLinks(cwd: string, adapter: LocalCompanionLaunchAdapter): void {
-  const sharedSkillsDir = path.join(cwd, SHARED_SKILLS_ROOT, SHARED_SKILLS_DIRNAME);
+function ensureSkillSyncLinks(
+  cwd: string,
+  adapter: LocalCompanionLaunchAdapter
+): void {
+  const sharedSkillsDir = path.join(
+    cwd,
+    SHARED_SKILLS_ROOT,
+    SHARED_SKILLS_DIRNAME
+  );
   fs.mkdirSync(sharedSkillsDir, { recursive: true });
   ensureSharedWechatSkill(sharedSkillsDir);
   ensureSharedSkillAlias(cwd, adapter, sharedSkillsDir);
@@ -413,20 +448,23 @@ function ensureSkillSyncLinks(cwd: string, adapter: LocalCompanionLaunchAdapter)
     try {
       const stat = fs.lstatSync(linkPath);
       if (stat.isSymbolicLink()) {
-        const target = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
+        const target = path.resolve(
+          path.dirname(linkPath),
+          fs.readlinkSync(linkPath)
+        );
         if (target === sharedSkillsDir) {
           continue;
         }
       } else if (stat.isDirectory()) {
         log(
           adapter,
-          `Skipping skills link for ${relativeTarget} because a real directory already exists.`,
+          `Skipping skills link for ${relativeTarget} because a real directory already exists.`
         );
         continue;
       } else {
         log(
           adapter,
-          `Skipping skills link for ${relativeTarget} because a non-directory path already exists.`,
+          `Skipping skills link for ${relativeTarget} because a non-directory path already exists.`
         );
         continue;
       }
@@ -439,13 +477,18 @@ function ensureSkillSyncLinks(cwd: string, adapter: LocalCompanionLaunchAdapter)
     } catch {
       // Best effort cleanup.
     }
-    fs.symlinkSync(path.relative(path.dirname(linkPath), sharedSkillsDir), linkPath, "dir");
+    fs.symlinkSync(
+      path.relative(path.dirname(linkPath), sharedSkillsDir),
+      linkPath,
+      "dir"
+    );
   }
 }
 
-function ensureTmuxSession(
-  options: LocalCompanionStartCliOptions,
-): { sessionName: string; created: boolean } {
+function ensureTmuxSession(options: LocalCompanionStartCliOptions): {
+  sessionName: string;
+  created: boolean;
+} {
   const sessionName = buildTmuxSessionName(options);
   if (doesTmuxSessionExist(sessionName)) {
     return { sessionName, created: false };
@@ -469,7 +512,9 @@ function ensureTmuxSession(
   return { sessionName, created: true };
 }
 
-async function runVisibleClientDirect(options: LocalCompanionStartCliOptions): Promise<number> {
+async function runVisibleClientDirect(
+  options: LocalCompanionStartCliOptions
+): Promise<number> {
   const entryPath = resolveForegroundClientEntryPath(options.adapter);
   const args = buildForegroundClientArgs(entryPath, options);
 
@@ -508,8 +553,17 @@ function openContainerLogMirrorFds(): [number, number] | null {
 }
 
 function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
-  const entryPath = path.resolve(MODULE_DIR, "..", "bridge", "wechat-bridge.ts");
-  const args = buildBackgroundBridgeArgs(entryPath, options, resolveStartBridgeLifecycle());
+  const entryPath = path.resolve(
+    MODULE_DIR,
+    "..",
+    "bridge",
+    "wechat-bridge.ts"
+  );
+  const args = buildBackgroundBridgeArgs(
+    entryPath,
+    options,
+    resolveStartBridgeLifecycle()
+  );
   const mirroredFds = openContainerLogMirrorFds();
 
   try {
@@ -517,7 +571,9 @@ function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
       cwd: options.cwd,
       env: process.env,
       detached: true,
-      stdio: mirroredFds ? ["ignore", mirroredFds[0], mirroredFds[1]] : "ignore",
+      stdio: mirroredFds
+        ? ["ignore", mirroredFds[0], mirroredFds[1]]
+        : "ignore",
       windowsHide: true,
     });
 
@@ -538,7 +594,7 @@ function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
 async function waitForEndpoint(
   cwd: string,
   adapter: LocalCompanionLaunchAdapter,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<LocalCompanionEndpoint> {
   const deadline = Date.now() + timeoutMs;
 
@@ -551,20 +607,25 @@ async function waitForEndpoint(
   }
 
   throw new Error(
-    `Timed out waiting for the ${adapter} bridge endpoint for ${cwd}. Check ${BRIDGE_LOG_FILE}.`,
+    `Timed out waiting for the ${adapter} bridge endpoint for ${cwd}. Check ${BRIDGE_LOG_FILE}.`
   );
 }
 
-async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promise<void> {
+async function ensureBridgeReady(
+  options: LocalCompanionStartCliOptions
+): Promise<void> {
   // If the lock is absent or the lock-holding process is dead, do NOT trust a
   // leftover endpoint.  The bridge (WeChat transport) may have crashed while
   // the opencode server kept running.  Starting only the panel would leave no
   // bridge to poll WeChat messages.
   const lock = readBridgeLockFile();
   const lockProcessAlive = lock ? isPidAlive(lock.pid) : false;
-  if (!lock || !lockProcessAlive) {
+  if (!(lock && lockProcessAlive)) {
     if (lock && !lockProcessAlive) {
-      log(options.adapter, `Found stale lock for ${options.cwd} (pid=${lock.pid} dead). Clearing.`);
+      log(
+        options.adapter,
+        `Found stale lock for ${options.cwd} (pid=${lock.pid} dead). Clearing.`
+      );
       clearLocalCompanionEndpoint(options.cwd);
     }
 
@@ -577,15 +638,24 @@ async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promis
   // Lock is held by a live process — check whether we can reuse or need to replace it.
   if (shouldAutoReclaimBridgeLock(lock)) {
     await stopExistingBridge(lock, options.adapter);
-    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
+    log(
+      options.adapter,
+      `Starting replacement bridge in background for ${options.cwd}...`
+    );
     startBridgeInBackground(options);
     await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
     return;
   }
 
-  if (lock.adapter !== options.adapter || !isSameWorkspaceCwd(lock.cwd, options.cwd)) {
+  if (
+    lock.adapter !== options.adapter ||
+    !isSameWorkspaceCwd(lock.cwd, options.cwd)
+  ) {
     await stopExistingBridge(lock, options.adapter);
-    log(options.adapter, `Starting replacement bridge in background for ${options.cwd}...`);
+    log(
+      options.adapter,
+      `Starting replacement bridge in background for ${options.cwd}...`
+    );
     startBridgeInBackground(options);
     await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
     return;
@@ -597,13 +667,21 @@ async function ensureBridgeReady(options: LocalCompanionStartCliOptions): Promis
     return;
   }
 
-  log(options.adapter, `Found running bridge for ${options.cwd}. Waiting for endpoint...`);
+  log(
+    options.adapter,
+    `Found running bridge for ${options.cwd}. Waiting for endpoint...`
+  );
   await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
 }
 
-async function runVisibleClient(options: LocalCompanionStartCliOptions): Promise<number> {
+async function runVisibleClient(
+  options: LocalCompanionStartCliOptions
+): Promise<number> {
   if (!isTmuxAvailable()) {
-    log(options.adapter, "tmux is not available; falling back to direct foreground launch.");
+    log(
+      options.adapter,
+      "tmux is not available; falling back to direct foreground launch."
+    );
     return await runVisibleClientDirect(options);
   }
 
@@ -612,7 +690,7 @@ async function runVisibleClient(options: LocalCompanionStartCliOptions): Promise
     options.adapter,
     created
       ? `Created tmux session ${sessionName} for ${options.cwd}.`
-      : `Reusing tmux session ${sessionName} for ${options.cwd}.`,
+      : `Reusing tmux session ${sessionName} for ${options.cwd}.`
   );
 
   if (!process.stdout.isTTY) {
@@ -632,7 +710,9 @@ async function main(): Promise<void> {
   migrateLegacyChannelFiles((message) => log(options.adapter, message));
 
   if (!fs.existsSync(CREDENTIALS_FILE)) {
-    throw new Error(`Missing WeChat credentials. Run "bun run setup" first. (${CREDENTIALS_FILE})`);
+    throw new Error(
+      `Missing WeChat credentials. Run "bun run setup" first. (${CREDENTIALS_FILE})`
+    );
   }
 
   await ensureBridgeReady(options);
@@ -640,7 +720,9 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-const isDirectRun = Boolean((import.meta as ImportMeta & { main?: boolean }).main);
+const isDirectRun = Boolean(
+  (import.meta as ImportMeta & { main?: boolean }).main
+);
 if (isDirectRun) {
   main().catch((error) => {
     const adapter = (() => {

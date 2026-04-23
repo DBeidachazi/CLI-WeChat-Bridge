@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type net from "node:net";
-
+import type {
+  BridgeAdapterState,
+  BridgeEvent,
+  BridgeUserInput,
+} from "../bridge/bridge-types.ts";
 import {
   ensureWorkspaceChannelDir,
   getWorkspaceChannelPaths,
 } from "../wechat/channel-config.ts";
-import type { BridgeAdapterState, BridgeEvent, BridgeUserInput } from "../bridge/bridge-types.ts";
 
 export type CodexPanelCommand =
   | { command: "send_input"; input: BridgeUserInput }
@@ -66,11 +69,7 @@ export function buildCodexPanelToken(): string {
 
 export function writeCodexPanelEndpoint(endpoint: CodexPanelEndpoint): void {
   const { endpointFile } = ensureWorkspaceChannelDir(endpoint.cwd);
-  fs.writeFileSync(
-    endpointFile,
-    JSON.stringify(endpoint, null, 2),
-    "utf8",
-  );
+  fs.writeFileSync(endpointFile, JSON.stringify(endpoint, null, 2), "utf8");
 }
 
 export function readCodexPanelEndpoint(cwd: string): CodexPanelEndpoint | null {
@@ -80,14 +79,17 @@ export function readCodexPanelEndpoint(cwd: string): CodexPanelEndpoint | null {
       return null;
     }
     return JSON.parse(
-      fs.readFileSync(endpointFile, "utf8"),
+      fs.readFileSync(endpointFile, "utf8")
     ) as CodexPanelEndpoint;
   } catch {
     return null;
   }
 }
 
-export function clearCodexPanelEndpoint(cwd: string, instanceId?: string): void {
+export function clearCodexPanelEndpoint(
+  cwd: string,
+  instanceId?: string
+): void {
   try {
     const { endpointFile } = getWorkspaceChannelPaths(cwd);
     if (!fs.existsSync(endpointFile)) {
@@ -110,14 +112,14 @@ export function clearCodexPanelEndpoint(cwd: string, instanceId?: string): void 
 
 export function sendCodexPanelMessage(
   socket: net.Socket,
-  message: CodexPanelMessage,
+  message: CodexPanelMessage
 ): void {
   socket.write(`${JSON.stringify(message)}\n`);
 }
 
 export function attachCodexPanelMessageListener(
   socket: net.Socket,
-  onMessage: (message: CodexPanelMessage) => void,
+  onMessage: (message: CodexPanelMessage) => void
 ): () => void {
   let buffer = "";
   const onData = (chunk: string | Buffer) => {

@@ -12,10 +12,9 @@ declare global {
   var __CLI_WECHAT_BRIDGE_ENV_LOADED__: boolean | undefined;
 }
 
-export const ENV_FILE_PATH =
-  process.env.CLI_WECHAT_BRIDGE_ENV_FILE?.trim()
-    ? path.resolve(process.env.CLI_WECHAT_BRIDGE_ENV_FILE.trim())
-    : path.join(PROJECT_DIR, ".env");
+export const ENV_FILE_PATH = process.env.CLI_WECHAT_BRIDGE_ENV_FILE?.trim()
+  ? path.resolve(process.env.CLI_WECHAT_BRIDGE_ENV_FILE.trim())
+  : path.join(PROJECT_DIR, ".env");
 
 if (!globalThis.__CLI_WECHAT_BRIDGE_ENV_LOADED__) {
   if (fs.existsSync(ENV_FILE_PATH)) {

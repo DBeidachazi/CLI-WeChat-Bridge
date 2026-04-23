@@ -11,21 +11,21 @@ describe("local companion reconnect policy", () => {
       shouldReconnectLocalCompanion({
         shuttingDown: false,
         closeReason: null,
-      }),
+      })
     ).toBe(true);
 
     expect(
       shouldReconnectLocalCompanion({
         shuttingDown: true,
         closeReason: null,
-      }),
+      })
     ).toBe(false);
 
     expect(
       shouldReconnectLocalCompanion({
         shuttingDown: false,
         closeReason: "worker_exit",
-      }),
+      })
     ).toBe(false);
   });
 

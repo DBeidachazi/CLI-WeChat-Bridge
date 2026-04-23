@@ -1,18 +1,16 @@
-import crypto from "node:crypto";
-import { createCipheriv, createDecipheriv } from "node:crypto";
+import crypto, { createCipheriv, createDecipheriv } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-
+import type { BridgeInputAttachment } from "../bridge/bridge-types.ts";
 import {
+  CHANNEL_DATA_DIR,
   CONTEXT_CACHE_FILE,
   CREDENTIALS_FILE,
   ensureChannelDataDir,
   INBOUND_MESSAGE_CLAIMS_DIR,
-  CHANNEL_DATA_DIR,
   migrateLegacyChannelFiles,
   SYNC_BUF_FILE,
 } from "./channel-config.ts";
-import type { BridgeInputAttachment } from "../bridge/bridge-types.ts";
 
 export const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 
@@ -56,31 +54,31 @@ interface TextItem {
 }
 
 interface CDNMedia {
-  encrypt_query_param?: string;
   aes_key?: string;
+  encrypt_query_param?: string;
   encrypt_type?: number;
   full_url?: string;
 }
 
 interface ImageItem {
-  media?: CDNMedia;
-  thumb_media?: CDNMedia;
   aeskey?: string;
-  url?: string;
+  media?: CDNMedia;
   mid_size?: number;
+  thumb_media?: CDNMedia;
+  url?: string;
 }
 
 interface VoiceItem {
-  media?: CDNMedia;
   encode_type?: number;
+  media?: CDNMedia;
   sample_rate?: number;
   text?: string;
 }
 
 interface FileItem {
-  media?: CDNMedia;
   file_name?: string;
   len?: string;
+  media?: CDNMedia;
 }
 
 interface VideoItem {
@@ -95,33 +93,33 @@ interface RefMessage {
 }
 
 interface MessageItem {
-  type?: number;
-  text_item?: TextItem;
-  image_item?: ImageItem;
-  voice_item?: VoiceItem;
   file_item?: FileItem;
-  video_item?: VideoItem;
+  image_item?: ImageItem;
   ref_msg?: RefMessage;
+  text_item?: TextItem;
+  type?: number;
+  video_item?: VideoItem;
+  voice_item?: VoiceItem;
 }
 
 interface WeixinMessage {
-  from_user_id?: string;
-  to_user_id?: string;
   client_id?: string;
-  session_id?: string;
-  message_type?: number;
-  message_state?: number;
-  item_list?: MessageItem[];
   context_token?: string;
   create_time_ms?: number;
+  from_user_id?: string;
+  item_list?: MessageItem[];
+  message_state?: number;
+  message_type?: number;
+  session_id?: string;
+  to_user_id?: string;
 }
 
 interface GetUpdatesResp {
-  ret?: number;
   errcode?: number;
   errmsg?: string;
-  msgs?: WeixinMessage[];
   get_updates_buf?: string;
+  msgs?: WeixinMessage[];
+  ret?: number;
 }
 
 export type InboundWechatMessage = {
@@ -223,12 +221,13 @@ const MEDIA_UPLOAD_LIMIT_ENV_KEYS: Record<UploadLabel, string> = {
   video: "WECHAT_MAX_VIDEO_MB",
 };
 const INBOUND_MEDIA_DIR = path.join(CHANNEL_DATA_DIR, "inbound-media");
-const MEDIA_KIND_DEFAULT_EXTENSIONS: Record<InboundMediaDownloadKind, string> = {
-  image: ".jpg",
-  file: ".bin",
-  voice: ".silk",
-  video: ".mp4",
-};
+const MEDIA_KIND_DEFAULT_EXTENSIONS: Record<InboundMediaDownloadKind, string> =
+  {
+    image: ".jpg",
+    file: ".bin",
+    voice: ".silk",
+    video: ".mp4",
+  };
 const MIME_TYPE_TO_EXTENSION: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/jpg": ".jpg",
@@ -391,7 +390,7 @@ function getErrorCause(value: unknown): unknown {
   if (isRecord(value) && "cause" in value) {
     return value.cause;
   }
-  return undefined;
+  return;
 }
 
 function collectErrorCodes(value: unknown): string[] {
@@ -402,7 +401,11 @@ function collectErrorCodes(value: unknown): string[] {
 
   while (current && depth < ERROR_CAUSE_DEPTH_LIMIT && !seen.has(current)) {
     seen.add(current);
-    if (isRecord(current) && typeof current.code === "string" && current.code.trim()) {
+    if (
+      isRecord(current) &&
+      typeof current.code === "string" &&
+      current.code.trim()
+    ) {
       codes.add(current.code.toUpperCase());
     }
     current = getErrorCause(current);
@@ -441,7 +444,7 @@ export function describeWechatTransportError(error: unknown): string {
 }
 
 export function classifyWechatTransportError(
-  error: unknown,
+  error: unknown
 ): WechatTransportErrorClassification {
   if (error instanceof Error) {
     if (error.name === "AbortError") {
@@ -507,7 +510,9 @@ async function apiFetch(params: {
   token?: string;
   timeoutMs: number;
 }): Promise<string> {
-  const base = params.baseUrl.endsWith("/") ? params.baseUrl : `${params.baseUrl}/`;
+  const base = params.baseUrl.endsWith("/")
+    ? params.baseUrl
+    : `${params.baseUrl}/`;
   const url = new URL(params.endpoint, base).toString();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
@@ -559,7 +564,7 @@ export function formatByteSize(bytes: number): string {
 
 export function resolveMediaUploadLimitBytes(
   label: UploadLabel,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): number {
   const envKey = MEDIA_UPLOAD_LIMIT_ENV_KEYS[label];
   const raw = env[envKey];
@@ -573,7 +578,7 @@ export function resolveMediaUploadLimitBytes(
 export function assertMediaUploadSizeAllowed(
   label: UploadLabel,
   rawsize: number,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): void {
   const limitBytes = resolveMediaUploadLimitBytes(label, env);
   if (rawsize <= limitBytes) {
@@ -583,7 +588,7 @@ export function assertMediaUploadSizeAllowed(
   const envKey = MEDIA_UPLOAD_LIMIT_ENV_KEYS[label];
   const labelName = label.charAt(0).toUpperCase() + label.slice(1);
   throw new Error(
-    `${labelName} too large: ${formatByteSize(rawsize)} exceeds ${formatByteSize(limitBytes)} limit. Set ${envKey} to override.`,
+    `${labelName} too large: ${formatByteSize(rawsize)} exceeds ${formatByteSize(limitBytes)} limit. Set ${envKey} to override.`
   );
 }
 
@@ -601,7 +606,7 @@ async function getUploadUrl(
     rawfilemd5: string;
     filesize: number;
     aeskey: string;
-  },
+  }
 ): Promise<{ upload_param?: string }> {
   const raw = await apiFetch({
     baseUrl: account.baseUrl,
@@ -620,7 +625,7 @@ async function getUploadUrl(
 function buildCdnUploadUrl(
   cdnBaseUrl: string,
   uploadParam: string,
-  filekey: string,
+  filekey: string
 ): string {
   return `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
 }
@@ -633,7 +638,11 @@ async function uploadBufferToCdn(params: {
   onRetry?: (attempt: number) => void;
 }): Promise<{ downloadParam: string }> {
   const ciphertext = encryptAesEcb(params.buf, params.aeskey);
-  const cdnUrl = buildCdnUploadUrl(CDN_BASE_URL, params.uploadParam, params.filekey);
+  const cdnUrl = buildCdnUploadUrl(
+    CDN_BASE_URL,
+    params.uploadParam,
+    params.filekey
+  );
 
   let downloadParam: string | undefined;
   let lastError: unknown;
@@ -651,7 +660,8 @@ async function uploadBufferToCdn(params: {
         throw new Error(`CDN client error ${res.status}: ${errMsg}`);
       }
       if (res.status !== 200) {
-        const errMsg = res.headers.get("x-error-message") ?? `status ${res.status}`;
+        const errMsg =
+          res.headers.get("x-error-message") ?? `status ${res.status}`;
         throw new Error(`CDN server error: ${errMsg}`);
       }
 
@@ -673,7 +683,9 @@ async function uploadBufferToCdn(params: {
   }
 
   if (!downloadParam) {
-    throw lastError instanceof Error ? lastError : new Error("CDN upload failed");
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("CDN upload failed");
   }
 
   return { downloadParam };
@@ -695,7 +707,7 @@ function decodeHexAesKey(encoded: string): Buffer | null {
 
 export function decodeWechatAesKey(
   media?: CDNMedia,
-  preferredHex?: string,
+  preferredHex?: string
 ): Buffer | null {
   const preferredDecoded = preferredHex ? decodeHexAesKey(preferredHex) : null;
   if (preferredDecoded) {
@@ -725,7 +737,9 @@ export function decodeWechatAesKey(
   return null;
 }
 
-function buildCdnDownloadUrl(target: InboundMediaDownloadTarget): string | null {
+function buildCdnDownloadUrl(
+  target: InboundMediaDownloadTarget
+): string | null {
   const fullUrl = target.media?.full_url?.trim();
   if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
     return fullUrl;
@@ -760,7 +774,7 @@ function sanitizeFileNameSegment(value: string): string {
 function inferAttachmentMimeType(
   kind: InboundMediaDownloadKind,
   title?: string,
-  directUrl?: string,
+  directUrl?: string
 ): string | undefined {
   const source = title || directUrl || "";
   const ext = path.extname(source).toLowerCase();
@@ -812,7 +826,7 @@ function inferAttachmentExtension(
   kind: InboundMediaDownloadKind,
   title?: string,
   mimeType?: string,
-  directUrl?: string,
+  directUrl?: string
 ): string {
   const titleExtension = path.extname(title || directUrl || "").toLowerCase();
   if (titleExtension) {
@@ -856,7 +870,7 @@ function isProbablyImagePayload(payload: Buffer): boolean {
 function decodeInboundMediaPayload(
   ciphertext: Buffer,
   aesKey: Buffer,
-  target: InboundMediaDownloadTarget,
+  target: InboundMediaDownloadTarget
 ): Buffer {
   const decrypted = decryptWechatCdnPayload(ciphertext, aesKey);
   if (target.kind !== "image") {
@@ -871,17 +885,19 @@ function decodeInboundMediaPayload(
     return ciphertext;
   }
 
-  throw new Error("Inbound image payload is not a valid image after download/decrypt");
+  throw new Error(
+    "Inbound image payload is not a valid image after download/decrypt"
+  );
 }
 
 async function downloadInboundMedia(
   account: AccountData,
   cacheKey: string,
-  target: InboundMediaDownloadTarget,
+  target: InboundMediaDownloadTarget
 ): Promise<BridgeInputAttachment | null> {
   const downloadUrl = buildCdnDownloadUrl(target);
   const aesKey = decodeWechatAesKey(target.media, target.preferredAesKeyHex);
-  if (!downloadUrl || !aesKey) {
+  if (!(downloadUrl && aesKey)) {
     return null;
   }
 
@@ -899,12 +915,15 @@ async function downloadInboundMedia(
     target.kind,
     target.title,
     mimeType,
-    target.directUrl,
+    target.directUrl
   );
   const baseName =
     sanitizeFileNameSegment(target.title ?? "") ||
     `${target.kind}-${crypto.createHash("sha1").update(cacheKey).digest("hex").slice(0, 12)}`;
-  const accountDir = path.join(INBOUND_MEDIA_DIR, sanitizeFileNameSegment(account.accountId) || "account");
+  const accountDir = path.join(
+    INBOUND_MEDIA_DIR,
+    sanitizeFileNameSegment(account.accountId) || "account"
+  );
   fs.mkdirSync(accountDir, { recursive: true });
   const filePath = path.join(accountDir, `${baseName}${extension}`);
   fs.writeFileSync(filePath, plaintext);
@@ -936,7 +955,9 @@ function extractReferenceLabel(item: MessageItem): string | null {
   return parts.length ? `Quoted: ${parts.join(" | ")}` : null;
 }
 
-function extractInboundMediaTargets(message: WeixinMessage): InboundMediaDownloadTarget[] {
+function extractInboundMediaTargets(
+  message: WeixinMessage
+): InboundMediaDownloadTarget[] {
   if (!message.item_list?.length) {
     return [];
   }
@@ -950,7 +971,11 @@ function extractInboundMediaTargets(message: WeixinMessage): InboundMediaDownloa
             kind: "image",
             title: undefined,
             sizeBytes: item.image_item?.mid_size,
-            mimeType: inferAttachmentMimeType("image", undefined, item.image_item?.url),
+            mimeType: inferAttachmentMimeType(
+              "image",
+              undefined,
+              item.image_item?.url
+            ),
             media: item.image_item?.media,
             preferredAesKeyHex: item.image_item?.aeskey,
             directUrl: item.image_item?.url,
@@ -1036,20 +1061,23 @@ function buildMessageKey(message: WeixinMessage): string {
   ].join("|");
 }
 
-function buildScopedMessageClaimKey(accountId: string, messageKey: string): string {
+function buildScopedMessageClaimKey(
+  accountId: string,
+  messageKey: string
+): string {
   return `${accountId}|${messageKey}`;
 }
 
 export function buildInboundMessageClaimPath(
   messageKey: string,
-  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR,
+  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR
 ): string {
   const fileName = `${crypto.createHash("sha1").update(messageKey).digest("hex")}.json`;
   return path.join(claimsDir, fileName);
 }
 
 export function clearInboundMessageClaims(
-  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR,
+  claimsDir = INBOUND_MESSAGE_CLAIMS_DIR
 ): void {
   try {
     fs.rmSync(claimsDir, { recursive: true, force: true });
@@ -1064,7 +1092,7 @@ export function tryClaimInboundMessage(
     claimsDir?: string;
     nowMs?: number;
     ttlMs?: number;
-  } = {},
+  } = {}
 ): boolean {
   if (!messageKey) {
     return false;
@@ -1088,9 +1116,9 @@ export function tryClaimInboundMessage(
             pid: process.pid,
           },
           null,
-          2,
+          2
         ),
-        "utf-8",
+        "utf-8"
       );
     } finally {
       fs.closeSync(handle);
@@ -1142,7 +1170,7 @@ export class WeChatTransport {
   private readonly recentMessageKeys = new Set<string>();
   private readonly recentMessageOrder: string[] = [];
   private readonly contextTokenCache = new Map<string, string>(
-    Object.entries(readJsonFile<ContextTokenState>(CONTEXT_CACHE_FILE) ?? {}),
+    Object.entries(readJsonFile<ContextTokenState>(CONTEXT_CACHE_FILE) ?? {})
   );
   private syncBuffer = "";
 
@@ -1194,7 +1222,7 @@ export class WeChatTransport {
   }
 
   async pollMessages(
-    options: PollMessagesOptions = {},
+    options: PollMessagesOptions = {}
   ): Promise<PollMessagesResult> {
     const timeoutMs = options.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
     const account = this.requireAccount();
@@ -1206,7 +1234,7 @@ export class WeChatTransport {
 
     if (isError) {
       throw new Error(
-        `getUpdates failed: ret=${response.ret} errcode=${response.errcode} errmsg=${response.errmsg ?? ""}`,
+        `getUpdates failed: ret=${response.ret} errcode=${response.errcode} errmsg=${response.errmsg ?? ""}`
       );
     }
 
@@ -1227,7 +1255,11 @@ export class WeChatTransport {
       if (!this.rememberMessage(messageKey)) {
         continue;
       }
-      if (!tryClaimInboundMessage(buildScopedMessageClaimKey(account.accountId, messageKey))) {
+      if (
+        !tryClaimInboundMessage(
+          buildScopedMessageClaimKey(account.accountId, messageKey)
+        )
+      ) {
         continue;
       }
 
@@ -1240,14 +1272,14 @@ export class WeChatTransport {
           const downloaded = await downloadInboundMedia(
             account,
             `${messageKey}|${index}`,
-            target,
+            target
           );
           if (downloaded) {
             attachments.push(downloaded);
           }
         } catch (error) {
           this.logger.logError(
-            `Failed to download inbound ${target.kind}: ${describeWechatTransportError(error)}`,
+            `Failed to download inbound ${target.kind}: ${describeWechatTransportError(error)}`
           );
         }
       }
@@ -1296,11 +1328,14 @@ export class WeChatTransport {
       resolved.account,
       resolved.recipientId,
       trimmed,
-      resolved.contextToken,
+      resolved.contextToken
     );
   }
 
-  async sendNotification(message: string, recipientId?: string): Promise<string> {
+  async sendNotification(
+    message: string,
+    recipientId?: string
+  ): Promise<string> {
     const trimmed = message.trim();
     if (!trimmed) {
       throw new Error("Notification text cannot be empty.");
@@ -1311,12 +1346,15 @@ export class WeChatTransport {
       resolved.account,
       resolved.recipientId,
       trimmed,
-      resolved.contextToken,
+      resolved.contextToken
     );
     return resolved.recipientId;
   }
 
-  async sendImage(imagePath: string, options: SendImageOptions = {}): Promise<string> {
+  async sendImage(
+    imagePath: string,
+    options: SendImageOptions = {}
+  ): Promise<string> {
     const resolved = this.resolveRecipient(options.recipientId);
     const caption = options.caption?.trim();
 
@@ -1325,7 +1363,7 @@ export class WeChatTransport {
         resolved.account,
         resolved.recipientId,
         caption,
-        resolved.contextToken,
+        resolved.contextToken
       );
     }
 
@@ -1334,51 +1372,64 @@ export class WeChatTransport {
       resolved.recipientId,
       imagePath,
       UPLOAD_MEDIA_TYPE_IMAGE,
-      "image",
+      "image"
     );
 
-    await this.sendMessage(resolved.account, resolved.recipientId, resolved.contextToken, [
-      {
-        type: MSG_ITEM_IMAGE,
-        image_item: {
-          media: {
-            encrypt_query_param: upload.downloadParam,
-            aes_key: encodeMessageAesKey(upload.aeskey),
-            encrypt_type: 1,
+    await this.sendMessage(
+      resolved.account,
+      resolved.recipientId,
+      resolved.contextToken,
+      [
+        {
+          type: MSG_ITEM_IMAGE,
+          image_item: {
+            media: {
+              encrypt_query_param: upload.downloadParam,
+              aes_key: encodeMessageAesKey(upload.aeskey),
+              encrypt_type: 1,
+            },
+            mid_size: upload.filesize,
           },
-          mid_size: upload.filesize,
         },
-      },
-    ]);
+      ]
+    );
 
     return resolved.recipientId;
   }
 
-  async sendFile(filePath: string, options: SendFileOptions = {}): Promise<string> {
+  async sendFile(
+    filePath: string,
+    options: SendFileOptions = {}
+  ): Promise<string> {
     const resolved = this.resolveRecipient(options.recipientId);
     const upload = await this.prepareUpload(
       resolved.account,
       resolved.recipientId,
       filePath,
       UPLOAD_MEDIA_TYPE_FILE,
-      "file",
+      "file"
     );
     const fileName = options.title?.trim() || path.basename(filePath);
 
-    await this.sendMessage(resolved.account, resolved.recipientId, resolved.contextToken, [
-      {
-        type: MSG_ITEM_FILE,
-        file_item: {
-          file_name: fileName,
-          len: String(upload.rawsize),
-          media: {
-            encrypt_query_param: upload.downloadParam,
-            aes_key: encodeMessageAesKey(upload.aeskey),
-            encrypt_type: 1,
+    await this.sendMessage(
+      resolved.account,
+      resolved.recipientId,
+      resolved.contextToken,
+      [
+        {
+          type: MSG_ITEM_FILE,
+          file_item: {
+            file_name: fileName,
+            len: String(upload.rawsize),
+            media: {
+              encrypt_query_param: upload.downloadParam,
+              aes_key: encodeMessageAesKey(upload.aeskey),
+              encrypt_type: 1,
+            },
           },
         },
-      },
-    ]);
+      ]
+    );
 
     return resolved.recipientId;
   }
@@ -1390,26 +1441,34 @@ export class WeChatTransport {
       resolved.recipientId,
       voicePath,
       UPLOAD_MEDIA_TYPE_VOICE,
-      "voice",
+      "voice"
     );
 
-    await this.sendMessage(resolved.account, resolved.recipientId, resolved.contextToken, [
-      {
-        type: MSG_ITEM_VOICE,
-        voice_item: {
-          media: {
-            encrypt_query_param: upload.downloadParam,
-            aes_key: encodeMessageAesKey(upload.aeskey),
-            encrypt_type: 1,
+    await this.sendMessage(
+      resolved.account,
+      resolved.recipientId,
+      resolved.contextToken,
+      [
+        {
+          type: MSG_ITEM_VOICE,
+          voice_item: {
+            media: {
+              encrypt_query_param: upload.downloadParam,
+              aes_key: encodeMessageAesKey(upload.aeskey),
+              encrypt_type: 1,
+            },
           },
         },
-      },
-    ]);
+      ]
+    );
 
     return resolved.recipientId;
   }
 
-  async sendVideo(videoPath: string, options: SendVideoOptions = {}): Promise<string> {
+  async sendVideo(
+    videoPath: string,
+    options: SendVideoOptions = {}
+  ): Promise<string> {
     const resolved = this.resolveRecipient(options.recipientId);
     const title = options.title?.trim();
 
@@ -1418,7 +1477,7 @@ export class WeChatTransport {
         resolved.account,
         resolved.recipientId,
         title,
-        resolved.contextToken,
+        resolved.contextToken
       );
     }
 
@@ -1427,22 +1486,27 @@ export class WeChatTransport {
       resolved.recipientId,
       videoPath,
       UPLOAD_MEDIA_TYPE_VIDEO,
-      "video",
+      "video"
     );
 
-    await this.sendMessage(resolved.account, resolved.recipientId, resolved.contextToken, [
-      {
-        type: MSG_ITEM_VIDEO,
-        video_item: {
-          media: {
-            encrypt_query_param: upload.downloadParam,
-            aes_key: encodeMessageAesKey(upload.aeskey),
-            encrypt_type: 1,
+    await this.sendMessage(
+      resolved.account,
+      resolved.recipientId,
+      resolved.contextToken,
+      [
+        {
+          type: MSG_ITEM_VIDEO,
+          video_item: {
+            media: {
+              encrypt_query_param: upload.downloadParam,
+              aes_key: encodeMessageAesKey(upload.aeskey),
+              encrypt_type: 1,
+            },
+            video_size: upload.filesize,
           },
-          video_size: upload.filesize,
         },
-      },
-    ]);
+      ]
+    );
 
     return resolved.recipientId;
   }
@@ -1451,7 +1515,7 @@ export class WeChatTransport {
     const account = this.getCredentials();
     if (!account) {
       throw new Error(
-        `No saved WeChat credentials found. Run "bun run setup" first. Expected file: ${CREDENTIALS_FILE}`,
+        `No saved WeChat credentials found. Run "bun run setup" first. Expected file: ${CREDENTIALS_FILE}`
       );
     }
     return account;
@@ -1466,7 +1530,7 @@ export class WeChatTransport {
       resolvedRecipientId = recipients[recipients.length - 1];
       if (!resolvedRecipientId) {
         throw new Error(
-          "No cached context token is available. Fetch messages first or ask the user to send a new WeChat message.",
+          "No cached context token is available. Fetch messages first or ask the user to send a new WeChat message."
         );
       }
     }
@@ -1474,7 +1538,7 @@ export class WeChatTransport {
     const contextToken = this.contextTokenCache.get(resolvedRecipientId);
     if (!contextToken) {
       throw new Error(
-        `No cached context token for ${resolvedRecipientId}. Fetch messages first or ask the user to send a new WeChat message.`,
+        `No cached context token for ${resolvedRecipientId}. Fetch messages first or ask the user to send a new WeChat message.`
       );
     }
 
@@ -1485,7 +1549,7 @@ export class WeChatTransport {
     account: AccountData,
     recipientId: string,
     text: string,
-    contextToken: string,
+    contextToken: string
   ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -1501,7 +1565,7 @@ export class WeChatTransport {
     account: AccountData,
     recipientId: string,
     contextToken: string,
-    itemList: unknown[],
+    itemList: unknown[]
   ): Promise<void> {
     await apiFetch({
       baseUrl: account.baseUrl,
@@ -1528,7 +1592,7 @@ export class WeChatTransport {
     recipientId: string,
     filePath: string,
     mediaType: number,
-    label: UploadLabel,
+    label: UploadLabel
   ): Promise<UploadPreparation> {
     const stat = this.requireExistingFile(filePath);
     assertMediaUploadSizeAllowed(label, stat.size);
@@ -1541,7 +1605,7 @@ export class WeChatTransport {
     const aeskey = crypto.randomBytes(16);
 
     this.logger.log(
-      `Uploading ${label}: ${filePath} (${rawsize} bytes, md5=${rawfilemd5})`,
+      `Uploading ${label}: ${filePath} (${rawsize} bytes, md5=${rawfilemd5})`
     );
 
     const uploadResp = await getUploadUrl(account, {
@@ -1565,13 +1629,13 @@ export class WeChatTransport {
       aeskey,
       onRetry: (attempt) => {
         this.logger.log(
-          `CDN upload attempt ${attempt} failed for ${label}, retrying...`,
+          `CDN upload attempt ${attempt} failed for ${label}, retrying...`
         );
       },
     });
 
     this.logger.log(
-      `${label} upload complete, downloadParam length=${downloadParam.length}`,
+      `${label} upload complete, downloadParam length=${downloadParam.length}`
     );
 
     return {
@@ -1599,7 +1663,7 @@ export class WeChatTransport {
 
   private async getUpdates(
     account: AccountData,
-    timeoutMs: number,
+    timeoutMs: number
   ): Promise<GetUpdatesResp> {
     try {
       const raw = await apiFetch({
@@ -1674,7 +1738,10 @@ export class WeChatTransport {
       this.contextTokenCache.delete(senderId);
     }
     this.contextTokenCache.set(senderId, token);
-    writeJsonFile(CONTEXT_CACHE_FILE, Object.fromEntries(this.contextTokenCache));
+    writeJsonFile(
+      CONTEXT_CACHE_FILE,
+      Object.fromEntries(this.contextTokenCache)
+    );
   }
 
   private clearContextTokenCache(): void {

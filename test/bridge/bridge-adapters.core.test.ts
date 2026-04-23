@@ -13,7 +13,9 @@ describe("local companion proxy lifecycle", () => {
   });
 
   test("companion-bound bridges stop after companion disconnect", () => {
-    expect(shouldStopBridgeAfterCompanionDisconnect("companion_bound")).toBe(true);
+    expect(shouldStopBridgeAfterCompanionDisconnect("companion_bound")).toBe(
+      true
+    );
   });
 
   test("undefined lifecycle keeps the historical persistent behavior", () => {
@@ -27,7 +29,7 @@ describe("local companion proxy lifecycle", () => {
         lifecycle: "companion_bound",
         expectedClose: true,
         reconnectGraceMs: 15_000,
-      }),
+      })
     ).toEqual({
       action: "shutdown",
       shutdownReason: "companion_closed",
@@ -43,7 +45,7 @@ describe("local companion proxy lifecycle", () => {
         lifecycle: "companion_bound",
         expectedClose: false,
         reconnectGraceMs: 15_000,
-      }),
+      })
     ).toEqual({
       action: "wait_for_reconnect",
       message:
@@ -58,7 +60,7 @@ describe("local companion proxy lifecycle", () => {
         lifecycle: "persistent",
         expectedClose: false,
         reconnectGraceMs: 15_000,
-      }),
+      })
     ).toEqual({
       action: "await_manual_reconnect",
       message:
@@ -78,9 +80,9 @@ describe("local companion proxy lifecycle", () => {
       buildCompanionReconnectTimeoutMessage({
         kind: "codex",
         reconnectGraceMs: 15_000,
-      }),
+      })
     ).toBe(
-      "codex companion did not reconnect within 15s. Stopping transient bridge bound to wechat-codex.",
+      "codex companion did not reconnect within 15s. Stopping transient bridge bound to wechat-codex."
     );
   });
 });

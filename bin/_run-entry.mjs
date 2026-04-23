@@ -22,7 +22,7 @@ export function runTsEntry(relativeEntryPath, extraArgs = []) {
       stdio: "inherit",
       cwd: process.cwd(),
       env: process.env,
-    },
+    }
   );
 
   child.once("error", (error) => {

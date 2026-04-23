@@ -11,7 +11,7 @@ export type AcpPromptCapabilities = {
 
 function isPromptInlineAttachmentSupported(
   attachment: BridgeInputAttachment,
-  capabilities: AcpPromptCapabilities,
+  capabilities: AcpPromptCapabilities
 ): boolean {
   return (
     (attachment.kind === "image" && capabilities.image) ||
@@ -23,7 +23,7 @@ function isPromptInlineAttachmentSupported(
 }
 
 function buildAcpPromptAttachmentBlock(
-  attachment: BridgeInputAttachment,
+  attachment: BridgeInputAttachment
 ): Record<string, unknown> | null {
   try {
     const data = fs.readFileSync(attachment.path).toString("base64");
@@ -52,7 +52,7 @@ function buildAcpPromptAttachmentBlock(
 }
 
 function buildAcpResourceLinkBlock(
-  attachment: BridgeInputAttachment,
+  attachment: BridgeInputAttachment
 ): Record<string, unknown> {
   return {
     type: "resource_link",
@@ -66,7 +66,7 @@ function buildAcpResourceLinkBlock(
 
 export function buildAcpPromptContent(
   input: BridgeUserInput,
-  capabilities: AcpPromptCapabilities,
+  capabilities: AcpPromptCapabilities
 ): Record<string, unknown>[] {
   const prompt: Record<string, unknown>[] = [
     {

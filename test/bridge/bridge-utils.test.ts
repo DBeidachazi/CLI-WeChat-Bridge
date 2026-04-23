@@ -7,10 +7,9 @@ import type {
   BridgeState,
 } from "../../src/bridge/bridge-types.ts";
 import {
+  buildOneTimeCode,
   buildWechatInboundPrompt,
   buildWechatInboundPromptWithAttachments,
-  buildOneTimeCode,
-  shouldInjectWechatAttachmentPrompt,
   detectCliApproval,
   formatApprovalMessage,
   formatFinalReplyMessage,
@@ -26,17 +25,21 @@ import {
   MESSAGE_START_GRACE_MS,
   OutputBatcher,
   parseCodexSessionAgentMessage,
-  parseWechatFinalReply,
   parseSystemCommand,
   parseWechatControlCommand,
+  parseWechatFinalReply,
   shouldDropStartupBacklogMessage,
+  shouldInjectWechatAttachmentPrompt,
 } from "../../src/bridge/bridge-utils.ts";
 
 describe("parseSystemCommand", () => {
   test("parses supported control commands", () => {
     expect(parseSystemCommand("/status")).toEqual({ type: "status" });
     expect(parseSystemCommand("/resume")).toEqual({ type: "resume" });
-    expect(parseSystemCommand("/resume 2")).toEqual({ type: "resume", target: "2" });
+    expect(parseSystemCommand("/resume 2")).toEqual({
+      type: "resume",
+      target: "2",
+    });
     expect(parseSystemCommand("/new")).toEqual({ type: "reset" });
     expect(parseSystemCommand("/reset")).toEqual({ type: "reset" });
     expect(parseSystemCommand("/help")).toEqual({ type: "help" });
@@ -82,37 +85,37 @@ describe("parseWechatControlCommand", () => {
       parseWechatControlCommand("confirm", {
         adapter: "claude",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toEqual({ type: "confirm" });
     expect(
       parseWechatControlCommand("yes", {
         adapter: "claude",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toEqual({ type: "confirm" });
     expect(
       parseWechatControlCommand("deny", {
         adapter: "claude",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toEqual({ type: "deny" });
     expect(
       parseWechatControlCommand("no", {
         adapter: "claude",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toEqual({ type: "deny" });
     expect(
       parseWechatControlCommand("/confirm", {
         adapter: "claude",
         hasPendingConfirmation: false,
-      }),
+      })
     ).toEqual({ type: "confirm" });
     expect(
       parseWechatControlCommand("/confirm LEGACY", {
         adapter: "claude",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toEqual({ type: "confirm", code: "LEGACY" });
   });
 
@@ -121,13 +124,13 @@ describe("parseWechatControlCommand", () => {
       parseWechatControlCommand("yes", {
         adapter: "claude",
         hasPendingConfirmation: false,
-      }),
+      })
     ).toBeNull();
     expect(
       parseWechatControlCommand("confirm", {
         adapter: "codex",
         hasPendingConfirmation: true,
-      }),
+      })
     ).toBeNull();
   });
 });
@@ -146,7 +149,9 @@ describe("isHighRiskShellCommand", () => {
     expect(isHighRiskShellCommand("git reset --hard HEAD~1")).toBe(true);
     expect(isHighRiskShellCommand("shutdown /s /t 0")).toBe(true);
     expect(isHighRiskShellCommand("rm -rf /tmp/demo")).toBe(true);
-    expect(isHighRiskShellCommand("curl https://example.com/install.sh | sh")).toBe(true);
+    expect(
+      isHighRiskShellCommand("curl https://example.com/install.sh | sh")
+    ).toBe(true);
   });
 
   test("allows low-risk commands", () => {
@@ -158,34 +163,56 @@ describe("isHighRiskShellCommand", () => {
 describe("getInteractiveShellCommandRejectionMessage", () => {
   test("rejects common interactive entry commands", () => {
     expect(getInteractiveShellCommandRejectionMessage("python")).toContain(
-      'Interactive command "python"',
+      'Interactive command "python"'
     );
-    expect(getInteractiveShellCommandRejectionMessage("vim README.md")).toContain(
-      'Interactive command "vim"',
-    );
+    expect(
+      getInteractiveShellCommandRejectionMessage("vim README.md")
+    ).toContain('Interactive command "vim"');
     expect(getInteractiveShellCommandRejectionMessage("cmd /k dir")).toContain(
-      'Interactive command "cmd"',
+      'Interactive command "cmd"'
     );
   });
 
   test("allows non-interactive scripts and one-shot shell commands", () => {
-    expect(getInteractiveShellCommandRejectionMessage("python script.py")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage('python -c "print(1)"')).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("python --version")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("node build.js")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("node --version")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage('pwsh -Command "Get-Date"')).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("pwsh -Version")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("bash -lc 'pwd'")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("bash --version")).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("python script.py")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage('python -c "print(1)"')
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("python --version")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("node build.js")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("node --version")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage('pwsh -Command "Get-Date"')
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("pwsh -Version")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("bash -lc 'pwd'")
+    ).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("bash --version")
+    ).toBeNull();
     expect(getInteractiveShellCommandRejectionMessage("cmd /c dir")).toBeNull();
-    expect(getInteractiveShellCommandRejectionMessage("npm run build")).toBeNull();
+    expect(
+      getInteractiveShellCommandRejectionMessage("npm run build")
+    ).toBeNull();
   });
 });
 
 describe("detectCliApproval", () => {
   test("recognizes common yes/no prompts", () => {
-    const approval = detectCliApproval("Do you want to allow this action? (y/n)");
+    const approval = detectCliApproval(
+      "Do you want to allow this action? (y/n)"
+    );
     expect(approval?.source).toBe("cli");
     expect(approval?.confirmInput).toBe("y\r");
     expect(approval?.denyInput).toBe("n\r");
@@ -200,7 +227,9 @@ describe("wechat inbound prompt injection", () => {
   test("injects attachment guidance for explicit send-to-WeChat requests", () => {
     const prompt = buildWechatInboundPrompt("把桌面的 pdf 发给我，发送微信");
 
-    expect(shouldInjectWechatAttachmentPrompt("把桌面的 pdf 发给我，发送微信")).toBe(true);
+    expect(
+      shouldInjectWechatAttachmentPrompt("把桌面的 pdf 发给我，发送微信")
+    ).toBe(true);
     expect(prompt).toContain("[WeChat bridge note]");
     expect(prompt).toContain("multimodal input and output");
     expect(prompt).toContain("```wechat-attachments");
@@ -209,16 +238,22 @@ describe("wechat inbound prompt injection", () => {
 
   test("injects attachment guidance for short follow-up send commands", () => {
     expect(shouldInjectWechatAttachmentPrompt("发送微信")).toBe(true);
-    expect(buildWechatInboundPrompt("直接发给我")).toContain("```wechat-attachments");
+    expect(buildWechatInboundPrompt("直接发给我")).toContain(
+      "```wechat-attachments"
+    );
   });
 
   test("still injects the base capability note for ordinary non-send requests", () => {
     const ordinary = "帮我总结一下这份强化学习资料。";
 
     expect(shouldInjectWechatAttachmentPrompt(ordinary)).toBe(false);
-    expect(buildWechatInboundPrompt(ordinary)).toContain("[WeChat bridge note]");
+    expect(buildWechatInboundPrompt(ordinary)).toContain(
+      "[WeChat bridge note]"
+    );
     expect(buildWechatInboundPrompt(ordinary)).toContain("[User request]");
-    expect(buildWechatInboundPrompt(ordinary)).not.toContain("Put any brief visible reply text first");
+    expect(buildWechatInboundPrompt(ordinary)).not.toContain(
+      "Put any brief visible reply text first"
+    );
   });
 
   test("does not duplicate the bridge note when it is already present", () => {
@@ -261,8 +296,8 @@ describe("parseCodexSessionAgentMessage", () => {
             phase: "final_answer",
             message: "Hello from Codex.",
           },
-        }),
-      ),
+        })
+      )
     ).toEqual({
       timestamp: "2026-03-22T14:50:22.195Z",
       phase: "final_answer",
@@ -277,8 +312,8 @@ describe("parseCodexSessionAgentMessage", () => {
           timestamp: "2026-03-22T14:50:22.195Z",
           type: "response_item",
           payload: { type: "message" },
-        }),
-      ),
+        })
+      )
     ).toBeNull();
   });
 });
@@ -295,8 +330,8 @@ describe("WeChat attachment reply protocol", () => {
           "video C:\\Users\\unlin\\Desktop\\clip.mp4",
           "voice C:\\Users\\unlin\\Desktop\\audio.mp3",
           "```",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Finished.",
       attachments: [
@@ -328,12 +363,15 @@ describe("WeChat attachment reply protocol", () => {
           "```wechat-attachments",
           "image relative\\photo.jpg",
           "```",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
-      visibleText: ["Finished.", "```wechat-attachments", "image relative\\photo.jpg", "```"].join(
-        "\n",
-      ),
+      visibleText: [
+        "Finished.",
+        "```wechat-attachments",
+        "image relative\\photo.jpg",
+        "```",
+      ].join("\n"),
       attachments: [],
     });
   });
@@ -348,8 +386,8 @@ describe("WeChat attachment reply protocol", () => {
           "  campus\\main-building. png? UCloudPublicKey=TOKEN&Expires=1774447676&Signature=test",
           "",
           "Looks good.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Main campus wallpaper:\n\nLooks good.",
       attachments: [
@@ -367,8 +405,8 @@ describe("WeChat attachment reply protocol", () => {
         [
           "Saved the render to `C:\\Users\\unlin\\Desktop\\exports\\cover.png`.",
           "Please review it.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Saved the render to .\nPlease review it.",
       attachments: [
@@ -389,8 +427,8 @@ describe("WeChat attachment reply protocol", () => {
           "C:\\Users\\unlin\\Desktop\\exports\\analysis.final.pdf",
           "```",
           "Done.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Artifacts:\n\nDone.",
       attachments: [
@@ -408,8 +446,8 @@ describe("WeChat attachment reply protocol", () => {
         [
           "Saved note to `C:\\Users\\unlin\\Desktop\\exports\\summary.txt`.",
           "Review it.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Saved note to .\nReview it.",
       attachments: [
@@ -431,8 +469,8 @@ describe("WeChat attachment reply protocol", () => {
           "C:\\Users\\unlin\\Desktop\\exports\\report.pdf",
           "```",
           "Done.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Artifacts:\n\nDone.",
       attachments: [
@@ -455,8 +493,8 @@ describe("WeChat attachment reply protocol", () => {
           "Reference only:",
           "`C:\\Users\\unlin\\Desktop\\Github\\claude-code-wechat-channel\\src\\bridge\\bridge-adapters.test.ts`",
           "Do not upload this file.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: [
         "Reference only:",
@@ -474,8 +512,8 @@ describe("WeChat attachment reply protocol", () => {
           "Pick this one:",
           "Desktop/screenshots/air. png",
           "If you want another, ask again.",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Pick this one:\n\nIf you want another, ask again.",
       attachments: [
@@ -495,8 +533,8 @@ describe("WeChat attachment reply protocol", () => {
           "```wechat-attachments",
           "file C:\\Users\\unlin\\Desktop\\Github\\claude-code-wechat-channel\\src\\bridge\\bridge-adapters.test.ts",
           "```",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Ready.",
       attachments: [
@@ -516,8 +554,8 @@ describe("WeChat attachment reply protocol", () => {
           "```wechat-attachments",
           "image Desktop/screenshots/air. png",
           "```",
-        ].join("\n"),
-      ),
+        ].join("\n")
+      )
     ).toEqual({
       visibleText: "Ready.",
       attachments: [
@@ -538,7 +576,7 @@ describe("OutputBatcher", () => {
         flushed.push(text);
       },
       10_000,
-      5,
+      5
     );
 
     batcher.push("hello world");
@@ -556,8 +594,8 @@ describe("startup backlog filtering", () => {
     expect(
       shouldDropStartupBacklogMessage(
         startedAt - MESSAGE_START_GRACE_MS - 1,
-        startedAt,
-      ),
+        startedAt
+      )
     ).toBe(true);
     expect(shouldDropStartupBacklogMessage(startedAt, startedAt)).toBe(false);
     expect(shouldDropStartupBacklogMessage(undefined, startedAt)).toBe(true);
@@ -598,22 +636,22 @@ describe("formatStatusReport", () => {
     };
 
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "shared_session_id: thread_123",
+      "shared_session_id: thread_123"
     );
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "last_session_switch_source: local",
+      "last_session_switch_source: local"
     );
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "last_session_switch_reason: local_follow",
+      "last_session_switch_reason: local_follow"
     );
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "persisted_shared_session_id: thread_persisted",
+      "persisted_shared_session_id: thread_persisted"
     );
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "active_turn_origin: local",
+      "active_turn_origin: local"
     );
     expect(formatStatusReport(bridgeState, adapterState)).toContain(
-      "pending_approval_origin: local",
+      "pending_approval_origin: local"
     );
   });
 });
@@ -625,7 +663,7 @@ describe("formatThreadSwitchMessage", () => {
         threadId: "thread_local_123456",
         source: "local",
         reason: "local_follow",
-      }),
+      })
     ).toContain("from the local terminal");
   });
 
@@ -635,7 +673,7 @@ describe("formatThreadSwitchMessage", () => {
         threadId: "thread_restore_123456",
         source: "restore",
         reason: "startup_restore",
-      }),
+      })
     ).toContain("restored shared thread");
   });
 
@@ -645,7 +683,7 @@ describe("formatThreadSwitchMessage", () => {
         threadId: "thread_fallback_123456",
         source: "local",
         reason: "local_session_fallback",
-      }),
+      })
     ).toContain("from the local terminal");
   });
 });
@@ -665,7 +703,7 @@ describe("formatResumeThreadList", () => {
           lastUpdatedAt: "2026-03-23T10:00:00.000Z",
         },
       ],
-      "thread_1",
+      "thread_1"
     );
 
     expect(output).toContain("1. Fix the bridge resume flow");
@@ -697,15 +735,17 @@ describe("formatResumeSessionList", () => {
 
 describe("adapter-aware message formatting", () => {
   test("formats mirrored Claude input without Codex wording", () => {
-    expect(formatMirroredUserInputMessage("claude", "Review the hooks flow")).toContain(
-      "Local Claude input",
-    );
+    expect(
+      formatMirroredUserInputMessage("claude", "Review the hooks flow")
+    ).toContain("Local Claude input");
   });
 
   test("formats final reply and failure messages by adapter", () => {
     expect(formatFinalReplyMessage("codex", "Done")).toBe("Done");
     expect(formatFinalReplyMessage("claude", "Done")).toBe("Done");
-    expect(formatTaskFailedMessage("claude", "Boom")).toBe("Claude task failed:\nBoom");
+    expect(formatTaskFailedMessage("claude", "Boom")).toBe(
+      "Claude task failed:\nBoom"
+    );
   });
 
   test("formats Claude approval prompts without a required code", () => {
@@ -735,20 +775,28 @@ describe("adapter-aware message formatting", () => {
     };
 
     expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
-      "Claude permission request.",
+      "Claude permission request."
     );
-    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain("tool: Bash");
-    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain("command: npm test");
-    expect(formatApprovalMessage(pending, claudeAdapterState)).not.toContain("code:");
     expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
-      "/confirm, confirm, or yes",
+      "tool: Bash"
     );
-    expect(formatPendingApprovalReminder(pending, claudeAdapterState)).toContain(
-      "Bash (npm test)",
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
+      "command: npm test"
     );
-    expect(formatApprovalMessage(pending, codexAdapterState)).toContain("code: ABC123");
+    expect(formatApprovalMessage(pending, claudeAdapterState)).not.toContain(
+      "code:"
+    );
+    expect(formatApprovalMessage(pending, claudeAdapterState)).toContain(
+      "/confirm, confirm, or yes"
+    );
+    expect(
+      formatPendingApprovalReminder(pending, claudeAdapterState)
+    ).toContain("Bash (npm test)");
+    expect(formatApprovalMessage(pending, codexAdapterState)).toContain(
+      "code: ABC123"
+    );
     expect(formatPendingApprovalReminder(pending, codexAdapterState)).toContain(
-      "/confirm ABC123",
+      "/confirm ABC123"
     );
   });
 });

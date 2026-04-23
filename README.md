@@ -265,13 +265,13 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 链接到统一的：
 
 ```text
-.aiskill/skills
+.linkai/skills
 ```
 
 并兼容旧路径：
 
 ```text
-.linkai/skills -> .aiskill/skills
+.aiskill/skills -> .linkai/skills
 ```
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
@@ -351,3 +351,5 @@ docker compose config
 ## 致谢
 
 项目在微信协议和 channel 方向上参考了 `openclaw-weixin` 的一些思路，也在此基础上继续朝“保留本地原生 CLI 工作流”的方向做了分化实现。
+
+原项目地址：[UNLINEARITY/CLI-WeChat-Bridge](https://github.com/UNLINEARITY/CLI-WeChat-Bridge)

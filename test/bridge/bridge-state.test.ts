@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   evaluateBridgeRuntimeOwnership,
   normalizeBridgeLockPayload,
-  shouldReusePersistedBridgeSession,
   shouldAutoReclaimBridgeLock,
+  shouldReusePersistedBridgeSession,
 } from "../../src/bridge/bridge-state.ts";
 
 describe("bridge-state lock helpers", () => {
@@ -61,8 +61,8 @@ describe("bridge-state lock helpers", () => {
           startedAt: "2026-03-27T00:00:00.000Z",
           lifecycle: "companion_bound",
         },
-        (pid) => pid === 123,
-      ),
+        (pid) => pid === 123
+      )
     ).toBe(true);
   });
 
@@ -80,8 +80,8 @@ describe("bridge-state lock helpers", () => {
           lifecycle: "persistent",
           legacyLifecycleFallback: true,
         },
-        (pid) => pid === 123,
-      ),
+        (pid) => pid === 123
+      )
     ).toBe(true);
   });
 
@@ -98,8 +98,8 @@ describe("bridge-state lock helpers", () => {
           startedAt: "2026-03-27T00:00:00.000Z",
           lifecycle: "persistent",
         },
-        (pid) => pid === 123,
-      ),
+        (pid) => pid === 123
+      )
     ).toBe(false);
   });
 
@@ -116,8 +116,8 @@ describe("bridge-state lock helpers", () => {
           startedAt: "2026-03-27T00:00:00.000Z",
           lifecycle: "companion_bound",
         },
-        (pid) => pid === 123 || pid === 456,
-      ),
+        (pid) => pid === 123 || pid === 456
+      )
     ).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe("bridge-state lock helpers", () => {
         currentCwd: "/app",
         persistedAdapter: "gemini",
         persistedCwd: "/app",
-      }),
+      })
     ).toBe(true);
 
     expect(
@@ -137,7 +137,7 @@ describe("bridge-state lock helpers", () => {
         currentCwd: "/app",
         persistedAdapter: "codex",
         persistedCwd: "/app",
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -146,7 +146,7 @@ describe("bridge-state lock helpers", () => {
         currentCwd: "/app",
         persistedAdapter: "gemini",
         persistedCwd: "/other",
-      }),
+      })
     ).toBe(false);
   });
 
@@ -157,7 +157,7 @@ describe("bridge-state lock helpers", () => {
         currentPid: 123,
         workspaceStateInstanceId: "bridge-new",
         lock: null,
-      }),
+      })
     ).toEqual({
       ok: false,
       reason: "superseded",
@@ -181,7 +181,7 @@ describe("bridge-state lock helpers", () => {
           startedAt: "2026-03-27T00:00:00.000Z",
           lifecycle: "persistent",
         },
-      }),
+      })
     ).toEqual({
       ok: true,
       rehydratedLock: false,
@@ -195,7 +195,7 @@ describe("bridge-state lock helpers", () => {
         currentPid: 123,
         workspaceStateInstanceId: "bridge-current",
         lock: null,
-      }),
+      })
     ).toEqual({
       ok: true,
       rehydratedLock: true,
@@ -219,7 +219,7 @@ describe("bridge-state lock helpers", () => {
           lifecycle: "persistent",
         },
         isProcessAlive: (pid) => pid === 789,
-      }),
+      })
     ).toEqual({
       ok: false,
       reason: "lock_conflict",

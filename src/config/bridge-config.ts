@@ -11,10 +11,17 @@ export const COMPANION_BRIDGE_ADAPTERS = [
   "gemini",
   "copilot",
 ] as const;
-export const ALL_BRIDGE_ADAPTERS = [...COMPANION_BRIDGE_ADAPTERS, "shell"] as const;
+export const ALL_BRIDGE_ADAPTERS = [
+  ...COMPANION_BRIDGE_ADAPTERS,
+  "shell",
+] as const;
 
-export type CompanionBridgeAdapterKind = (typeof COMPANION_BRIDGE_ADAPTERS)[number];
-export type AcpBridgeAdapterKind = Extract<BridgeAdapterKind, "gemini" | "copilot">;
+export type CompanionBridgeAdapterKind =
+  (typeof COMPANION_BRIDGE_ADAPTERS)[number];
+export type AcpBridgeAdapterKind = Extract<
+  BridgeAdapterKind,
+  "gemini" | "copilot"
+>;
 
 export type CodexApprovalPolicy =
   | "untrusted"
@@ -35,7 +42,7 @@ const DEFAULT_COPILOT_MODE =
 function readEnv(key: string): string | undefined {
   const value = process.env[key];
   if (typeof value !== "string") {
-    return undefined;
+    return;
   }
 
   const trimmed = value.trim();
@@ -71,7 +78,7 @@ function readIntegerEnv(key: string, fallback: number): number {
 
 function readBridgeAdapterEnv(
   key: string,
-  fallback: BridgeAdapterKind,
+  fallback: BridgeAdapterKind
 ): BridgeAdapterKind {
   const value = readEnv(key);
   if (!value) {
@@ -103,13 +110,13 @@ export function isBridgeAdapterKind(value: string): value is BridgeAdapterKind {
 }
 
 export function isCompanionBridgeAdapterKind(
-  value: BridgeAdapterKind,
+  value: BridgeAdapterKind
 ): value is CompanionBridgeAdapterKind {
   return (COMPANION_BRIDGE_ADAPTERS as readonly string[]).includes(value);
 }
 
 export function isAcpBridgeAdapterKind(
-  value: BridgeAdapterKind,
+  value: BridgeAdapterKind
 ): value is AcpBridgeAdapterKind {
   return value === "gemini" || value === "copilot";
 }
@@ -118,7 +125,9 @@ export function envKeyForSpawnCommand(kind: BridgeAdapterKind): string {
   return `WECHAT_BRIDGE_SPAWN_${kind.toUpperCase()}`;
 }
 
-export function envKeyForInstallCommand(kind: CompanionBridgeAdapterKind): string {
+export function envKeyForInstallCommand(
+  kind: CompanionBridgeAdapterKind
+): string {
   return `WECHAT_BRIDGE_INSTALL_${kind.toUpperCase()}`;
 }
 
@@ -127,12 +136,14 @@ export function getConfiguredSpawnCommand(kind: BridgeAdapterKind): string {
 }
 
 export function getConfiguredInstallCommand(
-  kind: CompanionBridgeAdapterKind,
+  kind: CompanionBridgeAdapterKind
 ): string | undefined {
   return readEnv(envKeyForInstallCommand(kind));
 }
 
-export function getConfiguredModelId(kind: BridgeAdapterKind): string | undefined {
+export function getConfiguredModelId(
+  kind: BridgeAdapterKind
+): string | undefined {
   const perAdapter = readEnv(`WECHAT_BRIDGE_${kind.toUpperCase()}_MODEL`);
   if (perAdapter) {
     return perAdapter;
@@ -155,10 +166,12 @@ export function getConfiguredModelId(kind: BridgeAdapterKind): string | undefine
     return DEFAULT_COPILOT_MODEL;
   }
 
-  return undefined;
+  return;
 }
 
-export function getConfiguredAcpMode(kind: AcpBridgeAdapterKind): string | undefined {
+export function getConfiguredAcpMode(
+  kind: AcpBridgeAdapterKind
+): string | undefined {
   const explicit = readEnv(`WECHAT_BRIDGE_${kind.toUpperCase()}_MODE`);
   if (explicit) {
     return explicit;
@@ -199,7 +212,8 @@ export function shouldMirrorBackgroundBridgeLogsToContainer(): boolean {
   return (
     process.platform !== "win32" &&
     (fs.existsSync("/.dockerenv") ||
-      (typeof process.env.container === "string" && process.env.container.length > 0))
+      (typeof process.env.container === "string" &&
+        process.env.container.length > 0))
   );
 }
 

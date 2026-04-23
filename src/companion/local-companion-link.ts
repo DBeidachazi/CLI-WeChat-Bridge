@@ -1,17 +1,16 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type net from "node:net";
-
-import {
-  ensureWorkspaceChannelDir,
-  getWorkspaceChannelPaths,
-} from "../wechat/channel-config.ts";
 import type {
   BridgeAdapterKind,
   BridgeAdapterState,
   BridgeEvent,
   BridgeUserInput,
 } from "../bridge/bridge-types.ts";
+import {
+  ensureWorkspaceChannelDir,
+  getWorkspaceChannelPaths,
+} from "../wechat/channel-config.ts";
 
 export type LocalCompanionCommand =
   | { command: "send_input"; input: BridgeUserInput }
@@ -131,9 +130,13 @@ function normalizeEndpoint(value: unknown): LocalCompanionEndpoint | null {
         ? record.renderMode
         : undefined,
     bridgeOwnerPid:
-      typeof record.bridgeOwnerPid === "number" ? record.bridgeOwnerPid : undefined,
-    serverPort: typeof record.serverPort === "number" ? record.serverPort : undefined,
-    serverUrl: typeof record.serverUrl === "string" ? record.serverUrl : undefined,
+      typeof record.bridgeOwnerPid === "number"
+        ? record.bridgeOwnerPid
+        : undefined,
+    serverPort:
+      typeof record.serverPort === "number" ? record.serverPort : undefined,
+    serverUrl:
+      typeof record.serverUrl === "string" ? record.serverUrl : undefined,
     cwd: record.cwd,
     command: record.command,
     profile: typeof record.profile === "string" ? record.profile : undefined,
@@ -145,9 +148,13 @@ function normalizeEndpoint(value: unknown): LocalCompanionEndpoint | null {
           ? record.sharedThreadId
           : undefined,
     resumeConversationId:
-      typeof record.resumeConversationId === "string" ? record.resumeConversationId : undefined,
+      typeof record.resumeConversationId === "string"
+        ? record.resumeConversationId
+        : undefined,
     transcriptPath:
-      typeof record.transcriptPath === "string" ? record.transcriptPath : undefined,
+      typeof record.transcriptPath === "string"
+        ? record.transcriptPath
+        : undefined,
     startedAt: record.startedAt,
   };
 }
@@ -156,20 +163,24 @@ export function buildLocalCompanionToken(): string {
   return crypto.randomBytes(18).toString("hex");
 }
 
-export function writeLocalCompanionEndpoint(endpoint: LocalCompanionEndpoint): void {
+export function writeLocalCompanionEndpoint(
+  endpoint: LocalCompanionEndpoint
+): void {
   const { endpointFile } = ensureWorkspaceChannelDir(endpoint.cwd);
   const payload: LocalCompanionEndpoint = {
     ...endpoint,
     sharedThreadId:
       endpoint.kind === "codex" || endpoint.kind === "opencode"
-        ? endpoint.sharedSessionId ?? endpoint.sharedThreadId
+        ? (endpoint.sharedSessionId ?? endpoint.sharedThreadId)
         : undefined,
   };
 
   fs.writeFileSync(endpointFile, JSON.stringify(payload, null, 2), "utf8");
 }
 
-export function readLocalCompanionEndpoint(cwd: string): LocalCompanionEndpoint | null {
+export function readLocalCompanionEndpoint(
+  cwd: string
+): LocalCompanionEndpoint | null {
   try {
     const { endpointFile } = getWorkspaceChannelPaths(cwd);
     if (!fs.existsSync(endpointFile)) {
@@ -181,7 +192,10 @@ export function readLocalCompanionEndpoint(cwd: string): LocalCompanionEndpoint 
   }
 }
 
-export function clearLocalCompanionEndpoint(cwd: string, instanceId?: string): void {
+export function clearLocalCompanionEndpoint(
+  cwd: string,
+  instanceId?: string
+): void {
   try {
     const { endpointFile } = getWorkspaceChannelPaths(cwd);
     if (!fs.existsSync(endpointFile)) {
@@ -204,7 +218,7 @@ export function clearLocalCompanionEndpoint(cwd: string, instanceId?: string): v
 
 export function sendLocalCompanionMessage(
   socket: net.Socket,
-  message: LocalCompanionMessage,
+  message: LocalCompanionMessage
 ): boolean {
   if (socket.destroyed || socket.writableEnded) {
     return false;
@@ -219,7 +233,7 @@ export function sendLocalCompanionMessage(
 
 export function attachLocalCompanionMessageListener(
   socket: net.Socket,
-  onMessage: (message: LocalCompanionMessage) => void,
+  onMessage: (message: LocalCompanionMessage) => void
 ): () => void {
   let buffer = "";
   const onData = (chunk: string | Buffer) => {

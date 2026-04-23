@@ -195,14 +195,14 @@ export type BridgeEvent =
     };
 
 export interface BridgeAdapter {
-  setEventSink(sink: (event: BridgeEvent) => void): void;
-  start(): Promise<void>;
-  sendInput(input: BridgeAdapterInput): Promise<void>;
-  listResumeSessions(limit?: number): Promise<BridgeResumeSessionCandidate[]>;
-  resumeSession(sessionId: string): Promise<void>;
-  interrupt(): Promise<boolean>;
-  reset(): Promise<void>;
-  resolveApproval(action: "confirm" | "deny"): Promise<boolean>;
   dispose(): Promise<void>;
   getState(): BridgeAdapterState;
+  interrupt(): Promise<boolean>;
+  listResumeSessions(limit?: number): Promise<BridgeResumeSessionCandidate[]>;
+  reset(): Promise<void>;
+  resolveApproval(action: "confirm" | "deny"): Promise<boolean>;
+  resumeSession(sessionId: string): Promise<void>;
+  sendInput(input: BridgeAdapterInput): Promise<void>;
+  setEventSink(sink: (event: BridgeEvent) => void): void;
+  start(): Promise<void>;
 }

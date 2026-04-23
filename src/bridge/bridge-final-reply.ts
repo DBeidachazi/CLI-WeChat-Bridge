@@ -22,7 +22,7 @@ export async function forwardWechatFinalReply(params: {
   const parsed = parseWechatFinalReply(rawText);
   const visibleText = formatFinalReplyMessage(
     adapter,
-    sanitizeWechatFinalReplyText(adapter, parsed.visibleText),
+    sanitizeWechatFinalReplyText(adapter, parsed.visibleText)
   ).trim();
 
   if (visibleText) {
@@ -47,9 +47,11 @@ export async function forwardWechatFinalReply(params: {
       }
     } catch (error) {
       const errorText =
-        error instanceof Error ? error.message : String(error ?? "unknown error");
+        error instanceof Error
+          ? error.message
+          : String(error ?? "unknown error");
       await sender.sendText(
-        `Failed to send ${attachment.kind} attachment: ${attachment.path}\n${errorText}`,
+        `Failed to send ${attachment.kind} attachment: ${attachment.path}\n${errorText}`
       );
     }
   }

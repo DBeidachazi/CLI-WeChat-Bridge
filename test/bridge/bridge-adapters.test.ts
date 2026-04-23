@@ -1,14 +1,16 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, test } from "bun:test";
-
 import {
-  buildCliEnvironment,
+  ShellAdapter,
+  ShellCommandRejectedError,
+} from "../../src/bridge/bridge-adapters.shell.ts";
+import {
   buildClaudeCliArgs,
-  buildCodexCliArgs,
+  buildCliEnvironment,
   buildCodexApprovalRequest,
+  buildCodexCliArgs,
   buildPtySpawnOptions,
   buildShellInputPayload,
   buildShellProfileCommand,
@@ -29,10 +31,6 @@ import {
   shouldIgnoreCodexSessionReplayEntry,
   shouldRecoverCodexStaleBusyState,
 } from "../../src/bridge/bridge-adapters.ts";
-import {
-  ShellAdapter,
-  ShellCommandRejectedError,
-} from "../../src/bridge/bridge-adapters.shell.ts";
 
 const tempDirectories: string[] = [];
 const originalHome = process.env.HOME;
@@ -40,7 +38,7 @@ const originalUserProfile = process.env.USERPROFILE;
 
 function makeTempDirectory(): string {
   const directory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "wechat-bridge-adapter-test-"),
+    path.join(os.tmpdir(), "wechat-bridge-adapter-test-")
   );
   tempDirectories.push(directory);
   return directory;
@@ -132,7 +130,7 @@ describe("resolveSpawnTarget", () => {
       "vendor",
       "x86_64-pc-windows-msvc",
       "codex",
-      "codex.exe",
+      "codex.exe"
     );
     writeFile(launcherPath);
     writeFile(vendorExePath);
@@ -169,7 +167,7 @@ describe("resolveSpawnTarget", () => {
       "vendor",
       "x86_64-pc-windows-msvc",
       "codex",
-      "codex.exe",
+      "codex.exe"
     );
     const hiddenVendorExePath = path.join(
       npmBinDirectory,
@@ -182,7 +180,7 @@ describe("resolveSpawnTarget", () => {
       "vendor",
       "x86_64-pc-windows-msvc",
       "codex",
-      "codex.exe",
+      "codex.exe"
     );
     writeFile(launcherPath);
     writeFile(packageVendorExePath);
@@ -254,12 +252,18 @@ describe("resolveSpawnTarget", () => {
 
 describe("resolveDefaultAdapterCommand", () => {
   test("keeps codex and claude defaults unchanged", () => {
-    expect(resolveDefaultAdapterCommand("codex", { platform: "linux" })).toBe("codex");
-    expect(resolveDefaultAdapterCommand("claude", { platform: "darwin" })).toBe("claude");
+    expect(resolveDefaultAdapterCommand("codex", { platform: "linux" })).toBe(
+      "codex"
+    );
+    expect(resolveDefaultAdapterCommand("claude", { platform: "darwin" })).toBe(
+      "claude"
+    );
   });
 
   test("keeps the Windows shell default unchanged", () => {
-    expect(resolveDefaultAdapterCommand("shell", { platform: "win32" })).toBe("powershell.exe");
+    expect(resolveDefaultAdapterCommand("shell", { platform: "win32" })).toBe(
+      "powershell.exe"
+    );
   });
 
   test("selects the first available non-Windows shell in priority order", () => {
@@ -272,7 +276,7 @@ describe("resolveDefaultAdapterCommand", () => {
       resolveDefaultAdapterCommand("shell", {
         platform: "linux",
         env: { PATH: binDirectory },
-      }),
+      })
     ).toBe("zsh");
   });
 
@@ -281,7 +285,7 @@ describe("resolveDefaultAdapterCommand", () => {
       resolveDefaultAdapterCommand("shell", {
         platform: "linux",
         env: { PATH: "" },
-      }),
+      })
     ).toThrow("Tried: pwsh, bash, zsh, sh");
   });
 });
@@ -344,7 +348,7 @@ describe("buildPtySpawnOptions", () => {
         cwd: "C:\\repo",
         env: { TERM: "xterm-256color" },
         platform: "win32",
-      }).useConpty,
+      }).useConpty
     ).toBe(true);
 
     expect(
@@ -352,7 +356,7 @@ describe("buildPtySpawnOptions", () => {
         cwd: "/repo",
         env: { TERM: "xterm-256color" },
         platform: "linux",
-      }).useConpty,
+      }).useConpty
     ).toBeUndefined();
   });
 });
@@ -366,9 +370,17 @@ describe("resolveShellRuntime", () => {
   });
 
   test("builds Windows PowerShell launch args for a long-lived shell session", () => {
-    expect(resolveShellRuntime("powershell.exe", { platform: "win32" })).toEqual({
+    expect(
+      resolveShellRuntime("powershell.exe", { platform: "win32" })
+    ).toEqual({
       family: "powershell",
-      launchArgs: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"],
+      launchArgs: [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-NoExit",
+      ],
     });
   });
 
@@ -381,16 +393,16 @@ describe("resolveShellRuntime", () => {
 
   test("rejects unsupported shell executables", () => {
     expect(() => resolveShellRuntime("fish", { platform: "linux" })).toThrow(
-      "Unsupported shell executable",
+      "Unsupported shell executable"
     );
   });
 });
 
 describe("shell helpers", () => {
   test("builds a PowerShell profile source command", () => {
-    expect(buildShellProfileCommand("C:\\profiles\\wechat.ps1", "powershell")).toContain(
-      'C:\\profiles\\wechat.ps1',
-    );
+    expect(
+      buildShellProfileCommand("C:\\profiles\\wechat.ps1", "powershell")
+    ).toContain("C:\\profiles\\wechat.ps1");
   });
 
   test("quotes POSIX shell profile paths safely", () => {
@@ -401,25 +413,29 @@ describe("shell helpers", () => {
 
   test("builds shell input payloads with a completion sentinel", () => {
     expect(buildShellInputPayload("Get-ChildItem", "powershell")).toContain(
-      "[System.Convert]::FromBase64String",
+      "[System.Convert]::FromBase64String"
     );
     expect(buildShellInputPayload("Get-ChildItem", "powershell")).toContain(
-      "__WECHAT_BRIDGE_DONE__",
+      "__WECHAT_BRIDGE_DONE__"
     );
     expect(buildShellInputPayload("Get-ChildItem", "powershell")).not.toContain(
-      "__wechatBridgeInvoke",
+      "__wechatBridgeInvoke"
     );
     expect(buildShellInputPayload("ls", "posix")).toContain(
-      "printf '%s:%s\\n'",
+      "printf '%s:%s\\n'"
     );
   });
 
   test("supports a custom shell completion marker", () => {
     expect(
-      buildShellInputPayload("Get-ChildItem", "powershell", "__WECHAT_BRIDGE_DONE__:abc"),
-    ).toContain('[System.Convert]::FromBase64String');
+      buildShellInputPayload(
+        "Get-ChildItem",
+        "powershell",
+        "__WECHAT_BRIDGE_DONE__:abc"
+      )
+    ).toContain("[System.Convert]::FromBase64String");
     expect(
-      buildShellInputPayload("ls", "posix", "__WECHAT_BRIDGE_DONE__:abc"),
+      buildShellInputPayload("ls", "posix", "__WECHAT_BRIDGE_DONE__:abc")
     ).toContain("printf '%s:%s\\n' '__WECHAT_BRIDGE_DONE__:abc'");
   });
 });
@@ -453,10 +469,12 @@ describe("ShellAdapter", () => {
     }).not.toThrow();
 
     expect(
-      events.some((event) => event.type === "stdout" && event.text === "hello"),
+      events.some((event) => event.type === "stdout" && event.text === "hello")
     ).toBe(true);
     expect(
-      events.some((event) => event.type === "task_complete" && event.exitCode === 0),
+      events.some(
+        (event) => event.type === "task_complete" && event.exitCode === 0
+      )
     ).toBe(true);
   });
 
@@ -493,7 +511,11 @@ describe("ShellAdapter", () => {
 
     internal.handleData("1:0\r\n");
 
-    expect(events.map((event) => event.type)).toEqual(["stdout", "status", "task_complete"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "stdout",
+      "status",
+      "task_complete",
+    ]);
     expect(events[2]?.exitCode).toBe(0);
     expect(adapter.getState().status).toBe("idle");
   });
@@ -538,9 +560,9 @@ describe("ShellAdapter", () => {
         ">> } finally {",
         '>>   Write-Output "__WECHAT_BRIDGE_DONE__:$global:LASTEXITCODE"',
         ">>   $ErrorActionPreference = $__wechatBridgePreviousErrorActionPreference",
-        '>> }Python 3.14.0 on win32',
+        ">> }Python 3.14.0 on win32",
         "",
-      ].join("\r\n"),
+      ].join("\r\n")
     );
 
     expect(events.map((event) => event.type)).toEqual(["stdout"]);
@@ -564,7 +586,7 @@ describe("ShellAdapter", () => {
     };
 
     await expect(adapter.sendInput("python")).rejects.toBeInstanceOf(
-      ShellCommandRejectedError,
+      ShellCommandRejectedError
     );
   });
 
@@ -594,7 +616,10 @@ describe("ShellAdapter", () => {
 
     internal.handleData("> __WECHAT_BRIDGE_DONE__:cmd_3:0\r\n");
 
-    expect(events.map((event) => event.type)).toEqual(["status", "task_complete"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "status",
+      "task_complete",
+    ]);
     expect(events[1]?.exitCode).toBe(0);
     expect(adapter.getState().status).toBe("idle");
   });
@@ -628,11 +653,13 @@ describe("ShellAdapter", () => {
     internal.state.activeTurnOrigin = "wechat";
 
     await adapter.interrupt();
-    await wait(1_600);
+    await wait(1600);
 
     internal.handleData("__WECHAT_BRIDGE_DONE__:cmd_2:130\r\n");
 
-    expect(events.filter((event) => event.type === "task_complete")).toHaveLength(1);
+    expect(
+      events.filter((event) => event.type === "task_complete")
+    ).toHaveLength(1);
     expect(adapter.getState().status).toBe("idle");
   });
 });
@@ -654,8 +681,8 @@ describe("matchesCodexSessionMeta", () => {
           cwd,
           startedAtMs,
           threadId: "thread_123",
-        },
-      ),
+        }
+      )
     ).toBe(true);
   });
 
@@ -675,8 +702,8 @@ describe("matchesCodexSessionMeta", () => {
           cwd,
           startedAtMs,
           sessionSource: "wechat_bridge",
-        },
-      ),
+        }
+      )
     ).toBe(false);
   });
 
@@ -696,8 +723,8 @@ describe("matchesCodexSessionMeta", () => {
           cwd,
           startedAtMs,
           sessionSource: "wechat_bridge",
-        },
-      ),
+        }
+      )
     ).toBe(false);
   });
 });
@@ -710,7 +737,7 @@ describe("buildCodexApprovalRequest", () => {
         command: "git push origin main",
         cwd: "C:\\repo",
         reason: "Network access is required to push this branch.",
-      },
+      }
     );
 
     expect(request).toEqual({
@@ -727,7 +754,7 @@ describe("buildCodexApprovalRequest", () => {
       {
         grantRoot: "C:\\repo\\generated",
         reason: "Extra write access is required for generated assets.",
-      },
+      }
     );
 
     expect(request).toEqual({
@@ -745,7 +772,7 @@ describe("buildCodexCliArgs", () => {
       buildCodexCliArgs("ws://127.0.0.1:8123", {
         profile: "wechat",
         inlineMode: false,
-      }),
+      })
     ).toEqual([
       "--enable",
       "tui_app_server",
@@ -761,7 +788,7 @@ describe("buildCodexCliArgs", () => {
       buildCodexCliArgs("ws://127.0.0.1:8123", {
         resumeThreadId: "thread_123",
         profile: "wechat",
-      }),
+      })
     ).toEqual([
       "resume",
       "thread_123",
@@ -778,7 +805,7 @@ describe("buildCodexCliArgs", () => {
     expect(
       buildCodexCliArgs("ws://127.0.0.1:8123", {
         inlineMode: true,
-      }),
+      })
     ).toEqual([
       "--enable",
       "tui_app_server",
@@ -792,10 +819,14 @@ describe("buildCodexCliArgs", () => {
 describe("Claude CLI compatibility", () => {
   test("detects whether the installed help text exposes --no-alt-screen", () => {
     expect(
-      hasClaudeNoAltScreenOption(`Options:\n  --settings <file>\n  --no-alt-screen\n`),
+      hasClaudeNoAltScreenOption(
+        "Options:\n  --settings <file>\n  --no-alt-screen\n"
+      )
     ).toBe(true);
     expect(
-      hasClaudeNoAltScreenOption(`Options:\n  --settings <file>\n  --resume [value]\n`),
+      hasClaudeNoAltScreenOption(
+        "Options:\n  --settings <file>\n  --resume [value]\n"
+      )
     ).toBe(false);
   });
 
@@ -805,7 +836,7 @@ describe("Claude CLI compatibility", () => {
         settingsFilePath: "/tmp/claude-settings.json",
         resumeConversationId: "session_123",
         profile: "wechat",
-      }),
+      })
     ).toEqual([
       "--settings",
       "/tmp/claude-settings.json",
@@ -821,15 +852,15 @@ describe("Claude CLI compatibility", () => {
       buildClaudeCliArgs({
         settingsFilePath: "/tmp/claude-settings.json",
         includeNoAltScreen: true,
-      }),
+      })
     ).toEqual(["--no-alt-screen", "--settings", "/tmp/claude-settings.json"]);
   });
 
   test("recognizes Claude invalid resume errors", () => {
     expect(
       isClaudeInvalidResumeError(
-        "No conversation found with session ID: 019d1b3c-bf74-7e31-b105-2f28e27fa969",
-      ),
+        "No conversation found with session ID: 019d1b3c-bf74-7e31-b105-2f28e27fa969"
+      )
     ).toBe(true);
     expect(isClaudeInvalidResumeError("Claude is ready.")).toBe(false);
   });
@@ -886,10 +917,13 @@ describe("Claude CLI compatibility", () => {
       {
         end() {},
         destroy() {},
-      } as any,
+      } as any
     );
 
-    expect(events.map((event) => event.type)).toEqual(["status", "approval_required"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "status",
+      "approval_required",
+    ]);
     expect(adapter.pendingApproval).toMatchObject({
       summary: "Claude permission is required for Bash.",
       commandPreview: "Bash: dir",
@@ -927,7 +961,7 @@ describe("Claude CLI compatibility", () => {
           socketPayloads.push(payload);
         },
         destroy() {},
-      } as any,
+      } as any
     );
 
     await wait(25);
@@ -958,8 +992,9 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; text?: string; level?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string; level?: string }) =>
-      events.push(event),
+    adapter.setEventSink(
+      (event: { type: string; text?: string; level?: string }) =>
+        events.push(event)
     );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
@@ -977,7 +1012,7 @@ describe("Claude CLI compatibility", () => {
       {
         end() {},
         destroy() {},
-      } as any,
+      } as any
     );
 
     adapter.handleClosedClaudeHookApproval("request-lost");
@@ -988,7 +1023,7 @@ describe("Claude CLI compatibility", () => {
       expect.objectContaining({
         type: "notice",
         level: "warning",
-      }),
+      })
     );
   });
 
@@ -1000,8 +1035,9 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; text?: string; level?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string; level?: string }) =>
-      events.push(event),
+    adapter.setEventSink(
+      (event: { type: string; text?: string; level?: string }) =>
+        events.push(event)
     );
     adapter.renderLocalOutput = () => undefined;
     adapter.pty = {
@@ -1057,12 +1093,14 @@ describe("Claude CLI compatibility", () => {
       {
         end() {},
         destroy() {},
-      } as any,
+      } as any
     );
     await wait(35);
 
     expect(events.filter((event) => event.type === "notice")).toHaveLength(0);
-    expect(events.filter((event) => event.type === "approval_required")).toHaveLength(1);
+    expect(
+      events.filter((event) => event.type === "approval_required")
+    ).toHaveLength(1);
 
     adapter.flushPendingClaudeHookApprovals();
     await adapter.dispose();
@@ -1118,11 +1156,16 @@ describe("Claude CLI compatibility", () => {
           type: "assistant",
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Recovered from transcript.\r\n\r\nSummary" }],
+            content: [
+              {
+                type: "text",
+                text: "Recovered from transcript.\r\n\r\nSummary",
+              },
+            ],
             stop_reason: "end_turn",
           },
         }),
-      ].join("\n"),
+      ].join("\n")
     );
 
     const adapter = createBridgeAdapter({
@@ -1133,7 +1176,9 @@ describe("Claude CLI compatibility", () => {
       initialTranscriptPath: transcriptPath,
     }) as any;
     const events: Array<{ type: string; text?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; text?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.pty = {
       pid: 1234,
@@ -1145,7 +1190,7 @@ describe("Claude CLI compatibility", () => {
     adapter.handleClaudeStop({});
 
     expect(events.find((event) => event.type === "final_reply")?.text).toBe(
-      "Recovered from transcript.\n\nSummary",
+      "Recovered from transcript.\n\nSummary"
     );
 
     await adapter.dispose();
@@ -1162,7 +1207,9 @@ describe("Claude CLI compatibility", () => {
       initialTranscriptPath: "/tmp/resume-123.jsonl",
     }) as any;
     const events: Array<{ type: string; text?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; text?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
     adapter.currentPreview = "/compact";
@@ -1182,9 +1229,13 @@ describe("Claude CLI compatibility", () => {
       resumeConversationId: "resume-123",
       transcriptPath: "/tmp/resume-123.jsonl",
     });
-    expect(events.map((event) => event.type)).toEqual(["notice", "status", "task_complete"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "notice",
+      "status",
+      "task_complete",
+    ]);
     expect(events[0]?.text).toBe(
-      "Conversation was compacted. Bridge is ready for new WeChat messages.",
+      "Conversation was compacted. Bridge is ready for new WeChat messages."
     );
   });
 
@@ -1196,19 +1247,27 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; text?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; text?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
     adapter.currentPreview = "/compact";
     adapter.state.status = "busy";
     adapter.state.activeTurnOrigin = "wechat";
 
-    adapter.handleData("\u001b[2mCompacted (ctrl+o to see full summary)\u001b[22m\r\n");
+    adapter.handleData(
+      "\u001b[2mCompacted (ctrl+o to see full summary)\u001b[22m\r\n"
+    );
 
     expect(adapter.getState().status).toBe("idle");
-    expect(events.map((event) => event.type)).toEqual(["notice", "status", "task_complete"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "notice",
+      "status",
+      "task_complete",
+    ]);
     expect(events[0]?.text).toBe(
-      "Conversation was compacted. Bridge is ready for new WeChat messages.",
+      "Conversation was compacted. Bridge is ready for new WeChat messages."
     );
   });
 
@@ -1220,7 +1279,9 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; message?: string }> = [];
-    adapter.setEventSink((event: { type: string; message?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; message?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
     adapter.currentPreview = "/compact";
@@ -1228,13 +1289,16 @@ describe("Claude CLI compatibility", () => {
     adapter.state.activeTurnOrigin = "wechat";
 
     adapter.handleData(
-      'Error: Error during compaction: Error: Please run /login · API Error: 403 {"error":{"message":"","type":"upstream_error"}}\r\n',
+      'Error: Error during compaction: Error: Please run /login · API Error: 403 {"error":{"message":"","type":"upstream_error"}}\r\n'
     );
 
     expect(adapter.getState().status).toBe("idle");
-    expect(events.map((event) => event.type)).toEqual(["status", "task_failed"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "status",
+      "task_failed",
+    ]);
     expect(events[1]?.message).toBe(
-      'Compact failed: Please run /login · API Error: 403 {"error":{"message":"","type":"upstream_error"}}',
+      'Compact failed: Please run /login · API Error: 403 {"error":{"message":"","type":"upstream_error"}}'
     );
   });
 
@@ -1246,7 +1310,9 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; message?: string }> = [];
-    adapter.setEventSink((event: { type: string; message?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; message?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
     adapter.currentPreview = "/compact";
@@ -1254,13 +1320,16 @@ describe("Claude CLI compatibility", () => {
     adapter.state.activeTurnOrigin = "wechat";
 
     adapter.handleData(
-      'Error: Error during compaction: Error: API Error: 502 {"error":{"message":"proxy failed","type":"proxy_error"}}\r\n',
+      'Error: Error during compaction: Error: API Error: 502 {"error":{"message":"proxy failed","type":"proxy_error"}}\r\n'
     );
 
     expect(adapter.getState().status).toBe("idle");
-    expect(events.map((event) => event.type)).toEqual(["status", "task_failed"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "status",
+      "task_failed",
+    ]);
     expect(events[1]?.message).toBe(
-      'Compact failed: API Error: 502 {"error":{"message":"proxy failed","type":"proxy_error"}}',
+      'Compact failed: API Error: 502 {"error":{"message":"proxy failed","type":"proxy_error"}}'
     );
   });
 
@@ -1272,20 +1341,26 @@ describe("Claude CLI compatibility", () => {
       renderMode: "companion",
     }) as any;
     const events: Array<{ type: string; message?: string }> = [];
-    adapter.setEventSink((event: { type: string; message?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; message?: string }) =>
+      events.push(event)
+    );
     adapter.renderLocalOutput = () => undefined;
     adapter.hasAcceptedInput = true;
     adapter.currentPreview = "/compact";
     adapter.state.status = "busy";
     adapter.state.activeTurnOrigin = "wechat";
 
-    adapter.handleData("Error: Error during compaction: Error: Please run /login · API Error: 403\r\n");
+    adapter.handleData(
+      "Error: Error during compaction: Error: Please run /login · API Error: 403\r\n"
+    );
     adapter.handleClaudeStopFailure({
       error: "Please run /login",
       error_details: "API Error: 403",
     });
 
-    expect(events.filter((event) => event.type === "task_failed")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "task_failed")).toHaveLength(
+      1
+    );
   });
 });
 
@@ -1297,7 +1372,7 @@ describe("extractCodexThreadFollowIdFromStatusChanged", () => {
         status: {
           type: "idle",
         },
-      }),
+      })
     ).toBe("thread_idle_123");
   });
 
@@ -1308,7 +1383,7 @@ describe("extractCodexThreadFollowIdFromStatusChanged", () => {
         status: {
           type: "notLoaded",
         },
-      }),
+      })
     ).toBeNull();
   });
 });
@@ -1324,7 +1399,7 @@ describe("extractCodexThreadStartedThreadId", () => {
             type: "idle",
           },
         },
-      }),
+      })
     ).toBe("thread_started_123");
   });
 
@@ -1338,7 +1413,7 @@ describe("shouldIgnoreCodexSessionReplayEntry", () => {
     const cutoff = Date.parse("2026-03-23T10:00:00.000Z");
 
     expect(
-      shouldIgnoreCodexSessionReplayEntry("2026-03-23T09:59:59.000Z", cutoff),
+      shouldIgnoreCodexSessionReplayEntry("2026-03-23T09:59:59.000Z", cutoff)
     ).toBe(true);
   });
 
@@ -1346,7 +1421,7 @@ describe("shouldIgnoreCodexSessionReplayEntry", () => {
     const cutoff = Date.parse("2026-03-23T10:00:00.000Z");
 
     expect(
-      shouldIgnoreCodexSessionReplayEntry("2026-03-23T10:00:01.000Z", cutoff),
+      shouldIgnoreCodexSessionReplayEntry("2026-03-23T10:00:01.000Z", cutoff)
     ).toBe(false);
   });
 
@@ -1366,7 +1441,7 @@ describe("shouldRecoverCodexStaleBusyState", () => {
         pendingTurnStart: false,
         hasActiveTurn: false,
         hasPendingApproval: false,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -1377,7 +1452,7 @@ describe("shouldRecoverCodexStaleBusyState", () => {
         pendingTurnStart: true,
         hasActiveTurn: false,
         hasPendingApproval: false,
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -1386,7 +1461,7 @@ describe("shouldRecoverCodexStaleBusyState", () => {
         pendingTurnStart: false,
         hasActiveTurn: true,
         hasPendingApproval: false,
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -1395,7 +1470,7 @@ describe("shouldRecoverCodexStaleBusyState", () => {
         pendingTurnStart: false,
         hasActiveTurn: false,
         hasPendingApproval: true,
-      }),
+      })
     ).toBe(false);
 
     expect(
@@ -1405,7 +1480,7 @@ describe("shouldRecoverCodexStaleBusyState", () => {
         hasActiveTurn: false,
         hasPendingApproval: false,
         activeTurnId: "turn_123",
-      }),
+      })
     ).toBe(false);
   });
 });
@@ -1421,10 +1496,10 @@ describe("shouldAutoCompleteCodexWechatTurnAfterFinalReply", () => {
         hasPendingApproval: false,
         hasFinalOutput: true,
         hasCompletedTurn: false,
-        lastActivityAtMs: 1_000,
-        nowMs: 2_100,
-        settleDelayMs: 1_000,
-      }),
+        lastActivityAtMs: 1000,
+        nowMs: 2100,
+        settleDelayMs: 1000,
+      })
     ).toBe(true);
   });
 
@@ -1438,10 +1513,10 @@ describe("shouldAutoCompleteCodexWechatTurnAfterFinalReply", () => {
         hasPendingApproval: false,
         hasFinalOutput: true,
         hasCompletedTurn: false,
-        lastActivityAtMs: 1_000,
-        nowMs: 2_100,
-        settleDelayMs: 1_000,
-      }),
+        lastActivityAtMs: 1000,
+        nowMs: 2100,
+        settleDelayMs: 1000,
+      })
     ).toBe(false);
 
     expect(
@@ -1453,10 +1528,10 @@ describe("shouldAutoCompleteCodexWechatTurnAfterFinalReply", () => {
         hasPendingApproval: true,
         hasFinalOutput: true,
         hasCompletedTurn: false,
-        lastActivityAtMs: 1_000,
-        nowMs: 2_100,
-        settleDelayMs: 1_000,
-      }),
+        lastActivityAtMs: 1000,
+        nowMs: 2100,
+        settleDelayMs: 1000,
+      })
     ).toBe(false);
 
     expect(
@@ -1468,10 +1543,10 @@ describe("shouldAutoCompleteCodexWechatTurnAfterFinalReply", () => {
         hasPendingApproval: false,
         hasFinalOutput: true,
         hasCompletedTurn: false,
-        lastActivityAtMs: 1_500,
-        nowMs: 2_100,
-        settleDelayMs: 1_000,
-      }),
+        lastActivityAtMs: 1500,
+        nowMs: 2100,
+        settleDelayMs: 1000,
+      })
     ).toBe(false);
   });
 });
@@ -1503,7 +1578,7 @@ describe("Codex panel completion recovery", () => {
           turn_id: "turn_1",
           last_agent_message: "done",
         },
-      }),
+      })
     );
 
     expect(adapter.activeTurn).toBeNull();
@@ -1565,9 +1640,11 @@ describe("Codex panel completion recovery", () => {
       cwd: process.cwd(),
       renderMode: "panel",
     }) as any;
-    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
-      events.push(event),
+    const events: Array<{ type: string; text?: string; threadId?: string }> =
+      [];
+    adapter.setEventSink(
+      (event: { type: string; text?: string; threadId?: string }) =>
+        events.push(event)
     );
     adapter.sharedThreadId = "thread_old";
     adapter.state.sharedSessionId = "thread_old";
@@ -1601,12 +1678,16 @@ describe("Codex panel completion recovery", () => {
     });
     expect(
       events
-        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .filter(
+          (event) =>
+            event.type === "thread_switched" ||
+            event.type === "mirrored_user_input"
+        )
         .map((event) =>
           event.type === "thread_switched"
             ? { type: event.type, threadId: event.threadId }
-            : { type: event.type, text: event.text },
-        ),
+            : { type: event.type, text: event.text }
+        )
     ).toEqual([
       {
         type: "thread_switched",
@@ -1626,9 +1707,11 @@ describe("Codex panel completion recovery", () => {
       cwd: process.cwd(),
       renderMode: "panel",
     }) as any;
-    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
-      events.push(event),
+    const events: Array<{ type: string; text?: string; threadId?: string }> =
+      [];
+    adapter.setEventSink(
+      (event: { type: string; text?: string; threadId?: string }) =>
+        events.push(event)
     );
     adapter.state.status = "idle";
 
@@ -1659,12 +1742,16 @@ describe("Codex panel completion recovery", () => {
     });
     expect(
       events
-        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .filter(
+          (event) =>
+            event.type === "thread_switched" ||
+            event.type === "mirrored_user_input"
+        )
         .map((event) =>
           event.type === "thread_switched"
             ? { type: event.type, threadId: event.threadId }
-            : { type: event.type, text: event.text },
-        ),
+            : { type: event.type, text: event.text }
+        )
     ).toEqual([
       {
         type: "thread_switched",
@@ -1684,9 +1771,11 @@ describe("Codex panel completion recovery", () => {
       cwd: process.cwd(),
       renderMode: "panel",
     }) as any;
-    const events: Array<{ type: string; text?: string; threadId?: string }> = [];
-    adapter.setEventSink((event: { type: string; text?: string; threadId?: string }) =>
-      events.push(event),
+    const events: Array<{ type: string; text?: string; threadId?: string }> =
+      [];
+    adapter.setEventSink(
+      (event: { type: string; text?: string; threadId?: string }) =>
+        events.push(event)
     );
     adapter.sharedThreadId = "thread_old";
     adapter.state.sharedSessionId = "thread_old";
@@ -1720,12 +1809,16 @@ describe("Codex panel completion recovery", () => {
     });
     expect(
       events
-        .filter((event) => event.type === "thread_switched" || event.type === "mirrored_user_input")
+        .filter(
+          (event) =>
+            event.type === "thread_switched" ||
+            event.type === "mirrored_user_input"
+        )
         .map((event) =>
           event.type === "thread_switched"
             ? { type: event.type, threadId: event.threadId }
-            : { type: event.type, text: event.text },
-        ),
+            : { type: event.type, text: event.text }
+        )
     ).toEqual([
       {
         type: "thread_switched",
@@ -1746,7 +1839,9 @@ describe("Codex panel completion recovery", () => {
       renderMode: "panel",
     }) as any;
     const events: Array<{ type: string; threadId?: string }> = [];
-    adapter.setEventSink((event: { type: string; threadId?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; threadId?: string }) =>
+      events.push(event)
+    );
     adapter.state.status = "idle";
 
     adapter.handleRpcNotification("thread/status/changed", {
@@ -1761,7 +1856,7 @@ describe("Codex panel completion recovery", () => {
     expect(
       events
         .filter((event) => event.type === "thread_switched")
-        .map((event) => ({ type: event.type, threadId: event.threadId })),
+        .map((event) => ({ type: event.type, threadId: event.threadId }))
     ).toEqual([
       {
         type: "thread_switched",
@@ -1778,7 +1873,9 @@ describe("Codex panel completion recovery", () => {
       renderMode: "panel",
     }) as any;
     const events: Array<{ type: string; threadId?: string }> = [];
-    adapter.setEventSink((event: { type: string; threadId?: string }) => events.push(event));
+    adapter.setEventSink((event: { type: string; threadId?: string }) =>
+      events.push(event)
+    );
     adapter.state.status = "idle";
 
     adapter.handleRpcNotification("thread/status/changed", {
@@ -1800,7 +1897,7 @@ describe("Codex panel completion recovery", () => {
     expect(
       events
         .filter((event) => event.type === "thread_switched")
-        .map((event) => ({ type: event.type, threadId: event.threadId })),
+        .map((event) => ({ type: event.type, threadId: event.threadId }))
     ).toEqual([
       {
         type: "thread_switched",
@@ -1824,7 +1921,7 @@ describe("findRecentCodexSessionFileForCwd", () => {
       "2025",
       "12",
       "31",
-      "historical-thread.jsonl",
+      "historical-thread.jsonl"
     );
     writeTextFile(
       sessionFilePath,
@@ -1846,12 +1943,15 @@ describe("findRecentCodexSessionFileForCwd", () => {
           },
           timestamp: "2026-03-23T12:00:01.000Z",
         }),
-      ].join("\n"),
+      ].join("\n")
     );
     const freshMtime = new Date("2026-03-23T12:00:05.000Z");
     fs.utimesSync(sessionFilePath, freshMtime, freshMtime);
 
-    const recent = findRecentCodexSessionFileForCwd(cwd, Date.parse("2026-03-23T12:00:00.000Z"));
+    const recent = findRecentCodexSessionFileForCwd(
+      cwd,
+      Date.parse("2026-03-23T12:00:00.000Z")
+    );
 
     expect(recent).not.toBeNull();
     expect(recent?.threadId).toBe("thread_historical_123");
@@ -1867,7 +1967,7 @@ describe("extractCodexFinalTextFromItem", () => {
         id: "msg_1",
         phase: "final_answer",
         text: "Final reply",
-      }),
+      })
     ).toBe("Final reply");
   });
 
@@ -1878,14 +1978,14 @@ describe("extractCodexFinalTextFromItem", () => {
         id: "msg_2",
         phase: "commentary",
         text: "Thinking...",
-      }),
+      })
     ).toBeNull();
 
     expect(
       extractCodexFinalTextFromItem({
         type: "commandExecution",
         id: "cmd_1",
-      }),
+      })
     ).toBeNull();
   });
 });
@@ -1903,7 +2003,7 @@ describe("extractCodexUserMessageText", () => {
             text_elements: [],
           },
         ],
-      }),
+      })
     ).toBe("List the files in this directory.");
   });
 
@@ -1923,7 +2023,7 @@ describe("extractCodexUserMessageText", () => {
             path: "C:\\repo\\diagram.png",
           },
         ],
-      }),
+      })
     ).toBe("[mention: repo]\n[local image: C:\\repo\\diagram.png]");
   });
 });
@@ -1938,7 +2038,14 @@ describe("listCodexResumeThreads", () => {
     process.env.USERPROFILE = homeDirectory;
 
     try {
-      const sessionsRoot = path.join(homeDirectory, ".codex", "sessions", "2026", "03", "23");
+      const sessionsRoot = path.join(
+        homeDirectory,
+        ".codex",
+        "sessions",
+        "2026",
+        "03",
+        "23"
+      );
       const repoCwd = "C:\\repo";
       const otherCwd = "C:\\other";
 
@@ -1963,7 +2070,7 @@ describe("listCodexResumeThreads", () => {
               message: "Inspect the current bridge implementation.",
             },
           }),
-        ].join("\n"),
+        ].join("\n")
       );
 
       writeTextFile(
@@ -1987,7 +2094,7 @@ describe("listCodexResumeThreads", () => {
               message: "Resume the latest saved thread.",
             },
           }),
-        ].join("\n"),
+        ].join("\n")
       );
 
       writeTextFile(
@@ -2003,7 +2110,7 @@ describe("listCodexResumeThreads", () => {
               source: "cli",
             },
           }),
-        ].join("\n"),
+        ].join("\n")
       );
 
       const candidates = listCodexResumeThreads(repoCwd, 10);

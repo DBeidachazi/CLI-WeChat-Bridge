@@ -14,14 +14,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  WeChatTransport,
   type InboundWechatMessage,
+  WeChatTransport,
 } from "./wechat-transport.ts";
 
 const SERVER_NAME = "wechat";
 const SERVER_VERSION = "0.3.0";
 
-const DEFAULT_POLL_TIMEOUT_MS = 1_000;
+const DEFAULT_POLL_TIMEOUT_MS = 1000;
 const MAX_POLL_TIMEOUT_MS = 35_000;
 
 type FetchMessagesArgs = {
@@ -87,7 +87,7 @@ function clampTimeoutMs(value: unknown, fallbackMs: number): number {
     return fallbackMs;
   }
   const rounded = Math.floor(value);
-  return Math.min(Math.max(rounded, 1_000), MAX_POLL_TIMEOUT_MS);
+  return Math.min(Math.max(rounded, 1000), MAX_POLL_TIMEOUT_MS);
 }
 
 function parseFetchMessagesArgs(args: unknown): FetchMessagesArgs {
@@ -113,7 +113,7 @@ function parseResetSyncArgs(args: unknown): ResetSyncArgs {
 }
 
 function parseReplyArgs(
-  args: unknown,
+  args: unknown
 ): { value: ReplyArgs } | { error: string } {
   const record = asObject(args);
   const senderId = record.sender_id;
@@ -135,7 +135,7 @@ function parseReplyArgs(
 }
 
 function parseNotifyArgs(
-  args: unknown,
+  args: unknown
 ): { value: NotifyArgs } | { error: string } {
   const record = asObject(args);
   const message = record.message;
@@ -151,13 +151,14 @@ function parseNotifyArgs(
   return {
     value: {
       message: message.trim(),
-      recipientId: typeof recipientId === "string" ? recipientId.trim() : undefined,
+      recipientId:
+        typeof recipientId === "string" ? recipientId.trim() : undefined,
     },
   };
 }
 
 function parseSendImageArgs(
-  args: unknown,
+  args: unknown
 ): { value: SendImageArgs } | { error: string } {
   const record = asObject(args);
   const imagePath = record.image_path;
@@ -178,13 +179,14 @@ function parseSendImageArgs(
     value: {
       imagePath: imagePath.trim(),
       caption: typeof caption === "string" ? caption.trim() : undefined,
-      recipientId: typeof recipientId === "string" ? recipientId.trim() : undefined,
+      recipientId:
+        typeof recipientId === "string" ? recipientId.trim() : undefined,
     },
   };
 }
 
 function parseSendFileArgs(
-  args: unknown,
+  args: unknown
 ): { value: SendFileArgs } | { error: string } {
   const record = asObject(args);
   const filePath = record.file_path;
@@ -205,13 +207,14 @@ function parseSendFileArgs(
     value: {
       filePath: filePath.trim(),
       title: typeof title === "string" ? title.trim() : undefined,
-      recipientId: typeof recipientId === "string" ? recipientId.trim() : undefined,
+      recipientId:
+        typeof recipientId === "string" ? recipientId.trim() : undefined,
     },
   };
 }
 
 function parseSendVoiceArgs(
-  args: unknown,
+  args: unknown
 ): { value: SendVoiceArgs } | { error: string } {
   const record = asObject(args);
   const voicePath = record.voice_path;
@@ -227,13 +230,14 @@ function parseSendVoiceArgs(
   return {
     value: {
       voicePath: voicePath.trim(),
-      recipientId: typeof recipientId === "string" ? recipientId.trim() : undefined,
+      recipientId:
+        typeof recipientId === "string" ? recipientId.trim() : undefined,
     },
   };
 }
 
 function parseSendVideoArgs(
-  args: unknown,
+  args: unknown
 ): { value: SendVideoArgs } | { error: string } {
   const record = asObject(args);
   const videoPath = record.video_path;
@@ -254,7 +258,8 @@ function parseSendVideoArgs(
     value: {
       videoPath: videoPath.trim(),
       title: typeof title === "string" ? title.trim() : undefined,
-      recipientId: typeof recipientId === "string" ? recipientId.trim() : undefined,
+      recipientId:
+        typeof recipientId === "string" ? recipientId.trim() : undefined,
     },
   };
 }
@@ -283,12 +288,12 @@ function formatFetchedMessages(messages: InboundWechatMessage[]): string {
       ...(message.attachments.length > 0
         ? message.attachments.map(
             (attachment) =>
-              `attachment: ${attachment.kind} ${attachment.path}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}`,
+              `attachment: ${attachment.kind} ${attachment.path}${attachment.mimeType ? ` (${attachment.mimeType})` : ""}`
           )
         : []),
       "text:",
       message.text,
-    ].join("\n"),
+    ].join("\n")
   );
 
   return [
@@ -304,7 +309,10 @@ async function replyToMessage(args: ReplyArgs): Promise<string> {
 }
 
 async function sendNotification(args: NotifyArgs): Promise<string> {
-  const recipientId = await transport.sendNotification(args.message, args.recipientId);
+  const recipientId = await transport.sendNotification(
+    args.message,
+    args.recipientId
+  );
   return `Sent message to ${recipientId}.`;
 }
 
@@ -325,7 +333,10 @@ async function sendFile(args: SendFileArgs): Promise<string> {
 }
 
 async function sendVoice(args: SendVoiceArgs): Promise<string> {
-  const recipientId = await transport.sendVoice(args.voicePath, args.recipientId);
+  const recipientId = await transport.sendVoice(
+    args.voicePath,
+    args.recipientId
+  );
   return `Sent voice to ${recipientId}.`;
 }
 
@@ -344,12 +355,14 @@ function textResult(text: string) {
 }
 
 async function executeTextAction(
-  action: () => Promise<string> | string,
+  action: () => Promise<string> | string
 ): Promise<{ content: { type: "text"; text: string }[] }> {
   try {
     return textResult(await action());
   } catch (err) {
-    return textResult(`error: ${err instanceof Error ? err.message : String(err)}`);
+    return textResult(
+      `error: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 
@@ -368,7 +381,7 @@ const mcp = new Server(
       "Use wechat_get_status to inspect auth and local state.",
       "Use wechat_reset_sync if you need to clear local sync state.",
     ].join("\n"),
-  },
+  }
 );
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -389,7 +402,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           wait_for_new: {
             type: "boolean",
-            description: "If true, long-poll briefly for new messages before returning.",
+            description:
+              "If true, long-poll briefly for new messages before returning.",
           },
           timeout_ms: {
             type: "number",
@@ -473,7 +487,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           title: {
             type: "string",
-            description: "Optional display name for the file. Defaults to the filename.",
+            description:
+              "Optional display name for the file. Defaults to the filename.",
           },
           recipient_id: {
             type: "string",
@@ -530,7 +545,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "wechat_reset_sync",
-      description: "Clear saved sync state so future fetches restart from a fresh cursor.",
+      description:
+        "Clear saved sync state so future fetches restart from a fresh cursor.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -549,9 +565,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "wechat_get_status":
       return textResult(transport.getStatusText());
     case "wechat_fetch_messages":
-      return executeTextAction(() => fetchMessages(parseFetchMessagesArgs(req.params.arguments)));
+      return executeTextAction(() =>
+        fetchMessages(parseFetchMessagesArgs(req.params.arguments))
+      );
     case "wechat_reset_sync":
-      return textResult(transport.resetSyncState(parseResetSyncArgs(req.params.arguments)));
+      return textResult(
+        transport.resetSyncState(parseResetSyncArgs(req.params.arguments))
+      );
     case "wechat_reply": {
       const parsed = parseReplyArgs(req.params.arguments);
       if ("error" in parsed) {

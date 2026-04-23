@@ -23,11 +23,11 @@ interface QRCodeResponse {
 }
 
 interface QRStatusResponse {
-  status: "wait" | "scaned" | "confirmed" | "expired";
+  baseurl?: string;
   bot_token?: string;
   ilink_bot_id?: string;
-  baseurl?: string;
   ilink_user_id?: string;
+  status: "wait" | "scaned" | "confirmed" | "expired";
 }
 
 type StoredAccount = {
@@ -43,7 +43,9 @@ function loadExistingCredentials(): StoredAccount | null {
     if (!fs.existsSync(CREDENTIALS_FILE)) {
       return null;
     }
-    return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8")) as StoredAccount;
+    return JSON.parse(
+      fs.readFileSync(CREDENTIALS_FILE, "utf-8")
+    ) as StoredAccount;
   } catch {
     return null;
   }
@@ -61,7 +63,7 @@ async function fetchQRCode(baseUrl: string): Promise<QRCodeResponse> {
 
 async function pollQRStatus(
   baseUrl: string,
-  qrcode: string,
+  qrcode: string
 ): Promise<QRStatusResponse> {
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const url = `${base}ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`;
@@ -161,7 +163,7 @@ async function main() {
         process.exit(1);
         break;
       case "confirmed": {
-        if (!status.ilink_bot_id || !status.bot_token) {
+        if (!(status.ilink_bot_id && status.bot_token)) {
           console.error("\nLogin failed: missing bot credentials from server.");
           process.exit(1);
         }
@@ -175,7 +177,11 @@ async function main() {
         };
 
         ensureChannelDataDir();
-        fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(account, null, 2), "utf-8");
+        fs.writeFileSync(
+          CREDENTIALS_FILE,
+          JSON.stringify(account, null, 2),
+          "utf-8"
+        );
         try {
           fs.chmodSync(CREDENTIALS_FILE, 0o600);
         } catch {
@@ -188,7 +194,9 @@ async function main() {
         console.log(`Credentials saved to: ${CREDENTIALS_FILE}`);
         console.log();
         console.log("No /pair step is required.");
-        console.log("The logged-in WeChat account above becomes the only authorized bridge owner.");
+        console.log(
+          "The logged-in WeChat account above becomes the only authorized bridge owner."
+        );
         console.log();
         console.log("Recommended single-command entrypoints:");
         console.log("  wechat-codex-start");
@@ -213,10 +221,14 @@ async function main() {
         console.log("  bun run bridge:shell");
         console.log();
         console.log("Container workflow:");
-        console.log("  docker logs -f <container>   # view QR code and the WeChat <-> CLI transcript");
+        console.log(
+          "  docker logs -f <container>   # view QR code and the WeChat <-> CLI transcript"
+        );
         console.log("  docker exec -it <container> bash");
         console.log("  codex | gemini | copilot | claude | opencode");
-        console.log("                           # log in providers manually inside the container");
+        console.log(
+          "                           # log in providers manually inside the container"
+        );
         console.log();
         console.log("Legacy MCP server entrypoint:");
         console.log("  bun run start");

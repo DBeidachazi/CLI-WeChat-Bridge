@@ -3,21 +3,8 @@ import net from "node:net";
 import path from "node:path";
 import { buildLocalCompanionToken } from "../companion/local-companion-link.ts";
 import { ensureWorkspaceChannelDir } from "../wechat/channel-config.ts";
-import {
-  buildClaudeFailureMessage,
-  buildClaudeHookScript,
-  buildClaudeHookSettings,
-  buildClaudePermissionDecisionHookOutput,
-  buildClaudePermissionApprovalRequest,
-  extractClaudeAssistantMessageText,
-  extractClaudeResumeConversationId,
-  extractClaudeTranscriptFinalReply,
-  findInjectedClaudePromptIndex,
-  normalizeClaudeAssistantMessage,
-  parseClaudeHookPayload,
-  type ClaudeHookPayload,
-  type PendingInjectedClaudePrompt,
-} from "./claude-hooks.ts";
+import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
+import * as shared from "./bridge-adapters.shared.ts";
 import type {
   ApprovalRequest,
   BridgeAdapterInput,
@@ -25,7 +12,6 @@ import type {
   BridgeResumeSessionCandidate,
   BridgeThreadSwitchReason,
   BridgeThreadSwitchSource,
-  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -33,8 +19,21 @@ import {
   nowIso,
   truncatePreview,
 } from "./bridge-utils.ts";
-import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
-import * as shared from "./bridge-adapters.shared.ts";
+import {
+  buildClaudeFailureMessage,
+  buildClaudeHookScript,
+  buildClaudeHookSettings,
+  buildClaudePermissionApprovalRequest,
+  buildClaudePermissionDecisionHookOutput,
+  type ClaudeHookPayload,
+  extractClaudeAssistantMessageText,
+  extractClaudeResumeConversationId,
+  extractClaudeTranscriptFinalReply,
+  findInjectedClaudePromptIndex,
+  normalizeClaudeAssistantMessage,
+  type PendingInjectedClaudePrompt,
+  parseClaudeHookPayload,
+} from "./claude-hooks.ts";
 
 type AdapterOptions = shared.AdapterOptions;
 type ClaudePendingHookApproval = shared.ClaudePendingHookApproval;
@@ -54,7 +53,7 @@ const CLAUDE_COMPACT_OUTPUT_LINE_RE =
   /^Compacted(?:\s*\(.*full summary.*\))?$/i;
 const CLAUDE_COMPACT_FAILURE_RE =
   /Error:\s*Error during compaction:|(?:^|\b)API Error:|\b(?:compact|compaction)\s+failed\b|^Error:/i;
-const CLAUDE_COMPACT_DEDUP_MS = 2_000;
+const CLAUDE_COMPACT_DEDUP_MS = 2000;
 
 export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   private hookServer: net.Server | null = null;
@@ -63,14 +62,20 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   private runtimeSessionId: string | null;
   private resumeConversationId: string | null;
   private transcriptPath: string | null;
-  private pendingCliApprovalHints:
-    | Pick<ApprovalRequest, "confirmInput" | "denyInput">
-    | null = null;
+  private pendingCliApprovalHints: Pick<
+    ApprovalRequest,
+    "confirmInput" | "denyInput"
+  > | null = null;
   private pendingInjectedInputs: PendingInjectedClaudePrompt[] = [];
-  private localTerminalInputListener: ((chunk: string | Buffer) => void) | null = null;
+  private localTerminalInputListener:
+    | ((chunk: string | Buffer) => void)
+    | null = null;
   private resizeListener: (() => void) | null = null;
   private settingsFilePath: string | null = null;
-  private readonly pendingHookApprovals = new Map<string, ClaudePendingHookApproval>();
+  private readonly pendingHookApprovals = new Map<
+    string,
+    ClaudePendingHookApproval
+  >();
   private recoveringInvalidResume = false;
   private workingNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   private workingNoticeSent = false;
@@ -79,7 +84,8 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
 
   constructor(options: AdapterOptions) {
     super(options);
-    this.runtimeSessionId = options.initialSharedSessionId ?? options.initialSharedThreadId ?? null;
+    this.runtimeSessionId =
+      options.initialSharedSessionId ?? options.initialSharedThreadId ?? null;
     this.resumeConversationId = options.initialResumeConversationId ?? null;
     this.transcriptPath = options.initialTranscriptPath ?? null;
     if (this.runtimeSessionId) {
@@ -108,7 +114,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       } catch {
         this.emitClaudeNotice(
           `Conversation transcript "${this.transcriptPath}" no longer exists (likely after compact). Starting fresh session.`,
-          "warning",
+          "warning"
         );
         this.transcriptPath = null;
         this.resumeConversationId = null;
@@ -135,10 +141,14 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       throw new Error("claude adapter is not running.");
     }
     if (this.state.status === "busy") {
-      throw new Error("claude is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "claude is still working. Wait for the current reply or use /stop."
+      );
     }
     if (this.pendingApproval) {
-      throw new Error("A Claude approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "A Claude approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
 
     const normalizedText = normalizeOutput(text).trim();
@@ -159,15 +169,17 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     this.armWechatWorkingNotice();
   }
 
-  override async listResumeSessions(_limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  override async listResumeSessions(
+    _limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     throw new Error(
-      'WeChat /resume is disabled in claude mode. Use /resume directly inside "wechat-claude"; WeChat will follow the active local session.',
+      'WeChat /resume is disabled in claude mode. Use /resume directly inside "wechat-claude"; WeChat will follow the active local session.'
     );
   }
 
   override async resumeSession(_threadId: string): Promise<void> {
     throw new Error(
-      'WeChat /resume is disabled in claude mode. Use /resume directly inside "wechat-claude"; WeChat will follow the active local session.',
+      'WeChat /resume is disabled in claude mode. Use /resume directly inside "wechat-claude"; WeChat will follow the active local session.'
     );
   }
 
@@ -175,7 +187,10 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     if (!this.pty) {
       return false;
     }
-    if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+    if (
+      this.state.status !== "busy" &&
+      this.state.status !== "awaiting_approval"
+    ) {
       return false;
     }
 
@@ -209,7 +224,10 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
 
     if (this.pendingApproval.requestId) {
-      const handled = this.respondToClaudeHookApproval(this.pendingApproval.requestId, action);
+      const handled = this.respondToClaudeHookApproval(
+        this.pendingApproval.requestId,
+        action
+      );
       if (handled) {
         this.clearWechatWorkingNotice();
         this.pendingCliApprovalHints = null;
@@ -222,10 +240,12 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
 
     const input =
-      action === "confirm" ? this.pendingApproval.confirmInput : this.pendingApproval.denyInput;
+      action === "confirm"
+        ? this.pendingApproval.confirmInput
+        : this.pendingApproval.denyInput;
     if (!input) {
       throw new Error(
-        "Remote approval is not safely available for this Claude prompt. Approve it in the local Claude terminal.",
+        "Remote approval is not safely available for this Claude prompt. Approve it in the local Claude terminal."
       );
     }
 
@@ -301,7 +321,8 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       if (this.pendingApproval) {
         this.pendingApproval = {
           ...this.pendingApproval,
-          confirmInput: this.pendingApproval.confirmInput ?? approval.confirmInput,
+          confirmInput:
+            this.pendingApproval.confirmInput ?? approval.confirmInput,
           denyInput: this.pendingApproval.denyInput ?? approval.denyInput,
         };
         this.state.pendingApproval = this.pendingApproval;
@@ -383,7 +404,10 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
           }
         });
         const cleanupPendingRequestsForSocket = () => {
-          for (const [requestId, pending] of this.pendingHookApprovals.entries()) {
+          for (const [
+            requestId,
+            pending,
+          ] of this.pendingHookApprovals.entries()) {
             if (pending.socket === socket) {
               this.pendingHookApprovals.delete(requestId);
               this.handleClosedClaudeHookApproval(requestId);
@@ -434,7 +458,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   }
 
   private writeClaudeRuntimeFiles(): void {
-    if (!this.hookPort || !this.hookToken) {
+    if (!(this.hookPort && this.hookToken)) {
       throw new Error("Claude hook server is not ready.");
     }
 
@@ -444,7 +468,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
 
     const hookScriptPath = path.join(
       runtimeDir,
-      process.platform === "win32" ? "hook.cmd" : "hook.sh",
+      process.platform === "win32" ? "hook.cmd" : "hook.sh"
     );
     const settingsFilePath = path.join(runtimeDir, "settings.json");
     const hookEntryPath = path.join(MODULE_DIR, "claude-hook.ts");
@@ -458,7 +482,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
         hookPort: this.hookPort,
         hookToken: this.hookToken,
       }),
-      "utf8",
+      "utf8"
     );
     if (process.platform !== "win32") {
       fs.chmodSync(hookScriptPath, 0o755);
@@ -471,7 +495,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     fs.writeFileSync(
       settingsFilePath,
       JSON.stringify(buildClaudeHookSettings(hookCommand), null, 2),
-      "utf8",
+      "utf8"
     );
     this.settingsFilePath = settingsFilePath;
   }
@@ -514,12 +538,15 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   }
 
   private resizePtyToTerminal(): void {
-    if (!this.pty || !process.stdout.isTTY) {
+    if (!(this.pty && process.stdout.isTTY)) {
       return;
     }
 
     try {
-      this.pty.resize(process.stdout.columns || DEFAULT_COLS, process.stdout.rows || DEFAULT_ROWS);
+      this.pty.resize(
+        process.stdout.columns || DEFAULT_COLS,
+        process.stdout.rows || DEFAULT_ROWS
+      );
     } catch {
       // Best effort resize sync.
     }
@@ -558,7 +585,9 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       }
 
       this.workingNoticeSent = true;
-      this.emitClaudeNotice(`Claude is still working on:\n${this.currentPreview}`);
+      this.emitClaudeNotice(
+        `Claude is still working on:\n${this.currentPreview}`
+      );
     }, this.workingNoticeDelayMs);
     this.workingNoticeTimer.unref?.();
   }
@@ -573,7 +602,10 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
   }
 
-  private emitClaudeNotice(text: string, level: BridgeNoticeLevel = "info"): void {
+  private emitClaudeNotice(
+    text: string,
+    level: BridgeNoticeLevel = "info"
+  ): void {
     const normalized = normalizeOutput(text).trim();
     if (!normalized) {
       return;
@@ -628,7 +660,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       .trim();
     return truncatePreview(
       `Compact failed: ${detail || "Claude reported an unknown compaction error."}`,
-      500,
+      500
     );
   }
 
@@ -682,7 +714,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
           : "";
       this.emitClaudeNotice(
         `Conversation was compacted.${detail} Bridge is ready for new WeChat messages.`,
-        "info",
+        "info"
       );
     }
 
@@ -732,10 +764,17 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
         this.respondToClaudeHook(params.socket, params.requestId);
         return;
       case "PermissionRequest":
-        this.handleClaudePermissionRequest(params.requestId, payload, params.socket);
+        this.handleClaudePermissionRequest(
+          params.requestId,
+          payload,
+          params.socket
+        );
         return;
       case "Notification":
-        if (payload.notification_type === "permission_prompt" && this.pendingApproval) {
+        if (
+          payload.notification_type === "permission_prompt" &&
+          this.pendingApproval
+        ) {
           this.setStatus("awaiting_approval", "Claude approval is required.");
         }
         this.respondToClaudeHook(params.socket, params.requestId);
@@ -766,11 +805,12 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     const previousRuntimeSessionId = this.runtimeSessionId;
     const previousResumeConversationId = this.resumeConversationId;
     const nextTranscriptPath =
-      typeof payload.transcript_path === "string" && payload.transcript_path.trim()
+      typeof payload.transcript_path === "string" &&
+      payload.transcript_path.trim()
         ? payload.transcript_path.trim()
         : null;
     const nextResumeConversationId = extractClaudeResumeConversationId(
-      nextTranscriptPath ?? undefined,
+      nextTranscriptPath ?? undefined
     );
 
     const compactedByTranscriptRotation =
@@ -783,10 +823,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
 
     // Compact may keep the same runtime session id, so rely on the structured
     // source when available and fall back to transcript rotation while a turn is active.
-    if (
-      payload.source === "compact" ||
-      compactedByTranscriptRotation
-    ) {
+    if (payload.source === "compact" || compactedByTranscriptRotation) {
       this.completeClaudeCompact({
         nextResumeConversationId,
       });
@@ -812,7 +849,9 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
         (nextResumeConversationId !== null &&
           nextResumeConversationId === previousResumeConversationId));
     const source: BridgeThreadSwitchSource = isRestore ? "restore" : "local";
-    const reason: BridgeThreadSwitchReason = isRestore ? "startup_restore" : "local_follow";
+    const reason: BridgeThreadSwitchReason = isRestore
+      ? "startup_restore"
+      : "local_follow";
     this.state.lastSessionSwitchAt = timestamp;
     this.state.lastSessionSwitchSource = source;
     this.state.lastSessionSwitchReason = reason;
@@ -827,12 +866,17 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
 
   private handleClaudeUserPromptSubmit(payload: { prompt?: string }): void {
     const prompt =
-      typeof payload.prompt === "string" ? normalizeOutput(payload.prompt).trim() : "";
+      typeof payload.prompt === "string"
+        ? normalizeOutput(payload.prompt).trim()
+        : "";
     if (!prompt) {
       return;
     }
 
-    const injectedIndex = findInjectedClaudePromptIndex(prompt, this.pendingInjectedInputs);
+    const injectedIndex = findInjectedClaudePromptIndex(
+      prompt,
+      this.pendingInjectedInputs
+    );
     if (injectedIndex >= 0) {
       this.pendingInjectedInputs.splice(injectedIndex, 1);
       return;
@@ -853,7 +897,9 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     });
   }
 
-  private async recoverFromInvalidResume(failedResumeConversationId: string): Promise<void> {
+  private async recoverFromInvalidResume(
+    failedResumeConversationId: string
+  ): Promise<void> {
     if (this.recoveringInvalidResume) {
       return;
     }
@@ -878,7 +924,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     this.state.lastSessionSwitchReason = undefined;
     this.emitClaudeNotice(
       `Saved Claude conversation ${failedResumeConversationId} is no longer available. Starting a fresh Claude session.`,
-      "warning",
+      "warning"
     );
 
     try {
@@ -891,7 +937,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   private handleClaudePermissionRequest(
     requestId: string,
     payload: ClaudeHookPayload,
-    socket: net.Socket,
+    socket: net.Socket
   ): void {
     this.clearWechatWorkingNotice();
     this.flushPendingClaudeHookApprovals();
@@ -904,8 +950,11 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
       ...request,
       requestId,
       confirmInput:
-        this.pendingApproval?.confirmInput ?? this.pendingCliApprovalHints?.confirmInput,
-      denyInput: this.pendingApproval?.denyInput ?? this.pendingCliApprovalHints?.denyInput,
+        this.pendingApproval?.confirmInput ??
+        this.pendingCliApprovalHints?.confirmInput,
+      denyInput:
+        this.pendingApproval?.denyInput ??
+        this.pendingCliApprovalHints?.denyInput,
     };
     this.pendingCliApprovalHints = null;
     this.state.pendingApproval = this.pendingApproval;
@@ -936,11 +985,14 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     this.state.pendingApproval = null;
     this.state.pendingApprovalOrigin = undefined;
     if (this.state.status === "awaiting_approval") {
-      this.setStatus("awaiting_approval", "Claude approval must be resolved in the local terminal.");
+      this.setStatus(
+        "awaiting_approval",
+        "Claude approval must be resolved in the local terminal."
+      );
     }
     this.emitClaudeNotice(
       "Claude approval can no longer be resolved from WeChat. Approve it in the local Claude terminal.",
-      "warning",
+      "warning"
     );
   }
 
@@ -957,7 +1009,9 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
   }
 
-  private resolveClaudeFinalReplyText(payload: { last_assistant_message?: string }): string {
+  private resolveClaudeFinalReplyText(payload: {
+    last_assistant_message?: string;
+  }): string {
     return (
       extractClaudeAssistantMessageText(payload) ||
       this.readClaudeTranscriptFinalReply() ||
@@ -999,7 +1053,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
   private respondToClaudeHook(
     socket: net.Socket,
     requestId: string,
-    stdout?: string,
+    stdout?: string
   ): void {
     try {
       socket.end(`${JSON.stringify({ requestId, stdout })}\n`);
@@ -1014,7 +1068,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
 
   private respondToClaudeHookApproval(
     requestId: string,
-    action: "confirm" | "deny",
+    action: "confirm" | "deny"
   ): boolean {
     const pending = this.pendingHookApprovals.get(requestId);
     if (!pending) {
@@ -1025,7 +1079,7 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     this.respondToClaudeHook(
       pending.socket,
       requestId,
-      buildClaudePermissionDecisionHookOutput(action),
+      buildClaudePermissionDecisionHookOutput(action)
     );
     return true;
   }
@@ -1046,4 +1100,3 @@ export class ClaudeCompanionAdapter extends AbstractPtyAdapter {
     }
   }
 }
-

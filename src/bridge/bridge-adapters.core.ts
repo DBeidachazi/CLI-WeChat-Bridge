@@ -1,27 +1,27 @@
 ﻿import net from "node:net";
-import { spawn as spawnPty } from "node-pty";
 import type { IPty } from "node-pty";
+import { spawn as spawnPty } from "node-pty";
 import {
   attachLocalCompanionMessageListener,
   buildLocalCompanionToken,
   clearLocalCompanionEndpoint,
-  sendLocalCompanionMessage,
-  writeLocalCompanionEndpoint,
   type LocalCompanionCloseReason,
   type LocalCompanionCommand,
   type LocalCompanionEndpoint,
   type LocalCompanionMessage,
+  sendLocalCompanionMessage,
+  writeLocalCompanionEndpoint,
 } from "../companion/local-companion-link.ts";
+import * as shared from "./bridge-adapters.shared.ts";
 import type {
   ApprovalRequest,
   BridgeAdapter,
-  BridgeAdapterKind,
   BridgeAdapterInput,
+  BridgeAdapterKind,
   BridgeAdapterState,
   BridgeEvent,
   BridgeLifecycleMode,
   BridgeResumeSessionCandidate,
-  BridgeUserInput,
 } from "./bridge-types.ts";
 import {
   detectCliApproval,
@@ -29,7 +29,6 @@ import {
   nowIso,
   truncatePreview,
 } from "./bridge-utils.ts";
-import * as shared from "./bridge-adapters.shared.ts";
 
 type AdapterOptions = shared.AdapterOptions;
 type EventSink = shared.EventSink;
@@ -74,21 +73,25 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
       cwd: options.cwd,
       command: options.command,
       profile: options.profile,
-      sharedSessionId: options.initialSharedSessionId ?? options.initialSharedThreadId,
+      sharedSessionId:
+        options.initialSharedSessionId ?? options.initialSharedThreadId,
       sharedThreadId:
         options.kind === "codex" || options.kind === "opencode"
-          ? options.initialSharedSessionId ?? options.initialSharedThreadId
+          ? (options.initialSharedSessionId ?? options.initialSharedThreadId)
           : undefined,
       activeRuntimeSessionId:
         options.kind === "claude" ||
         options.kind === "opencode" ||
         options.kind === "gemini" ||
         options.kind === "copilot"
-          ? options.initialSharedSessionId ?? options.initialSharedThreadId
+          ? (options.initialSharedSessionId ?? options.initialSharedThreadId)
           : undefined,
       resumeConversationId:
-        options.kind === "claude" ? options.initialResumeConversationId : undefined,
-      transcriptPath: options.kind === "claude" ? options.initialTranscriptPath : undefined,
+        options.kind === "claude"
+          ? options.initialResumeConversationId
+          : undefined,
+      transcriptPath:
+        options.kind === "claude" ? options.initialTranscriptPath : undefined,
     };
   }
 
@@ -106,7 +109,7 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     this.clearReconnectShutdownTimer();
     this.setStatus(
       "starting",
-      `Waiting for manual ${this.options.kind} companion connection. Run "${getLocalCompanionCommandName(this.options.kind)}" in a second terminal for this directory.`,
+      `Waiting for manual ${this.options.kind} companion connection. Run "${getLocalCompanionCommandName(this.options.kind)}" in a second terminal for this directory.`
     );
 
     await new Promise<void>((resolve, reject) => {
@@ -120,7 +123,11 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
       server.listen(0, CODEX_APP_SERVER_HOST, () => {
         const address = server.address();
         if (!address || typeof address === "string") {
-          reject(new Error(`Failed to allocate a local ${this.options.kind} companion port.`));
+          reject(
+            new Error(
+              `Failed to allocate a local ${this.options.kind} companion port.`
+            )
+          );
           return;
         }
 
@@ -150,12 +157,16 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     });
   }
 
-  async listResumeSessions(limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  async listResumeSessions(
+    limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     const result = await this.sendRequest({
       command: "list_resume_sessions",
       limit,
     });
-    return Array.isArray(result) ? (result as BridgeResumeSessionCandidate[]) : [];
+    return Array.isArray(result)
+      ? (result as BridgeResumeSessionCandidate[])
+      : [];
   }
 
   async resumeSession(sessionId: string): Promise<void> {
@@ -190,7 +201,9 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     this.shuttingDown = true;
     this.expectedCloseReason = null;
     this.clearReconnectShutdownTimer();
-    this.rejectPendingRequests(`${this.options.kind} companion proxy is shutting down.`);
+    this.rejectPendingRequests(
+      `${this.options.kind} companion proxy is shutting down.`
+    );
     clearLocalCompanionEndpoint(this.options.cwd, this.endpoint?.instanceId);
 
     if (this.socket) {
@@ -237,27 +250,30 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
 
     let authenticated = false;
     socket.setNoDelay(true);
-    const detachListener = attachLocalCompanionMessageListener(socket, (message) => {
-      if (!authenticated) {
-        if (
-          message.type !== "hello" ||
-          message.token !== this.endpoint?.token
-        ) {
-          socket.destroy();
+    const detachListener = attachLocalCompanionMessageListener(
+      socket,
+      (message) => {
+        if (!authenticated) {
+          if (
+            message.type !== "hello" ||
+            message.token !== this.endpoint?.token
+          ) {
+            socket.destroy();
+            return;
+          }
+
+          authenticated = true;
+          this.clearReconnectShutdownTimer();
+          this.expectedCloseReason = null;
+          this.socket = socket;
+          this.detachMessageListener = detachListener;
+          sendLocalCompanionMessage(socket, { type: "hello_ack" });
           return;
         }
 
-        authenticated = true;
-        this.clearReconnectShutdownTimer();
-        this.expectedCloseReason = null;
-        this.socket = socket;
-        this.detachMessageListener = detachListener;
-        sendLocalCompanionMessage(socket, { type: "hello_ack" });
-        return;
+        this.handlePanelMessage(message);
       }
-
-      this.handlePanelMessage(message);
-    });
+    );
 
     socket.once("close", () => {
       if (this.socket === socket) {
@@ -284,16 +300,22 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
         return;
       case "state":
         if (this.endpoint) {
-          const nextSessionId = getSharedSessionIdFromAdapterState(message.state);
+          const nextSessionId = getSharedSessionIdFromAdapterState(
+            message.state
+          );
           if (
             this.endpoint.sharedSessionId !== nextSessionId ||
-            this.endpoint.resumeConversationId !== message.state.resumeConversationId ||
+            this.endpoint.resumeConversationId !==
+              message.state.resumeConversationId ||
             this.endpoint.transcriptPath !== message.state.transcriptPath
           ) {
-              this.endpoint.sharedSessionId = nextSessionId;
-              this.endpoint.sharedThreadId =
-                this.options.kind === "codex" || this.options.kind === "opencode" ? nextSessionId : undefined;
-            this.endpoint.resumeConversationId = message.state.resumeConversationId;
+            this.endpoint.sharedSessionId = nextSessionId;
+            this.endpoint.sharedThreadId =
+              this.options.kind === "codex" || this.options.kind === "opencode"
+                ? nextSessionId
+                : undefined;
+            this.endpoint.resumeConversationId =
+              message.state.resumeConversationId;
             this.endpoint.transcriptPath = message.state.transcriptPath;
             writeLocalCompanionEndpoint(this.endpoint);
           }
@@ -332,7 +354,9 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
         this.pendingRequests.delete(message.id);
         if (!message.ok) {
           pending.reject(
-            new Error(message.error ?? `Unknown ${this.options.kind} companion error.`),
+            new Error(
+              message.error ?? `Unknown ${this.options.kind} companion error.`
+            )
           );
           return;
         }
@@ -361,7 +385,7 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
   }
 
   private handleCompanionDisconnect(
-    expectedCloseReason: LocalCompanionCloseReason | null,
+    expectedCloseReason: LocalCompanionCloseReason | null
   ): void {
     const disposition = getCompanionDisconnectDisposition({
       kind: this.options.kind,
@@ -424,7 +448,10 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     this.reconnectShutdownTimer = null;
   }
 
-  private setStatus(status: BridgeAdapterState["status"], message?: string): void {
+  private setStatus(
+    status: BridgeAdapterState["status"],
+    message?: string
+  ): void {
     this.state.status = status;
     this.eventSink({
       type: "status",
@@ -445,11 +472,13 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
     const socket = this.socket;
     if (!socket) {
       throw new Error(
-        `${this.options.kind} companion is not connected. Run "${getLocalCompanionCommandName(this.options.kind)}" in a second terminal for this directory.`,
+        `${this.options.kind} companion is not connected. Run "${getLocalCompanionCommandName(this.options.kind)}" in a second terminal for this directory.`
       );
     }
     if (!this.state.pid && payload.command !== "dispose") {
-      throw new Error(`${this.options.kind} companion is connected but not ready yet. Wait for it to finish starting.`);
+      throw new Error(
+        `${this.options.kind} companion is connected but not ready yet. Wait for it to finish starting.`
+      );
     }
 
     const id = `${++this.requestCounter}`;
@@ -467,13 +496,13 @@ export class LocalCompanionProxyAdapter implements BridgeAdapter {
 }
 
 export function shouldStopBridgeAfterCompanionDisconnect(
-  lifecycle: BridgeLifecycleMode | undefined,
+  lifecycle: BridgeLifecycleMode | undefined
 ): boolean {
   return lifecycle === "companion_bound";
 }
 
 export function isExpectedLocalCompanionClose(
-  reason: LocalCompanionCloseReason | null | undefined,
+  reason: LocalCompanionCloseReason | null | undefined
 ): boolean {
   return typeof reason === "string" && reason.length > 0;
 }
@@ -579,7 +608,7 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
         buildPtySpawnOptions({
           cwd: this.options.cwd,
           env,
-        }),
+        })
       );
 
       this.pty = ptyProcess;
@@ -623,7 +652,9 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
     this.scheduleTaskComplete(this.defaultCompletionDelayMs());
   }
 
-  async listResumeSessions(_limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  async listResumeSessions(
+    _limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     throw new Error("/resume is only supported for the codex adapter.");
   }
 
@@ -703,12 +734,12 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
   }
 
   protected defaultCompletionDelayMs(): number {
-    return 5_000;
+    return 5000;
   }
 
   protected async applyApproval(
     action: "confirm" | "deny",
-    pendingApproval: ApprovalRequest,
+    pendingApproval: ApprovalRequest
   ): Promise<boolean> {
     if (!this.pty) {
       return false;
@@ -716,8 +747,8 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
 
     const input =
       action === "confirm"
-        ? pendingApproval.confirmInput ?? "y\r"
-        : pendingApproval.denyInput ?? "n\r";
+        ? (pendingApproval.confirmInput ?? "y\r")
+        : (pendingApproval.denyInput ?? "n\r");
     this.setStatus("busy");
     this.writeToPty(input);
     this.scheduleTaskComplete(this.defaultCompletionDelayMs());
@@ -734,7 +765,7 @@ export abstract class AbstractPtyAdapter implements BridgeAdapter {
 
   protected setStatus(
     status: BridgeAdapterState["status"],
-    message?: string,
+    message?: string
   ): void {
     this.state.status = status;
     this.emit({

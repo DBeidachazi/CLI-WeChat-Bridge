@@ -1,3 +1,5 @@
+import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
+import * as shared from "./bridge-adapters.shared.ts";
 import type { ApprovalRequest, BridgeAdapterInput } from "./bridge-types.ts";
 import {
   getInteractiveShellCommandRejectionMessage,
@@ -6,8 +8,6 @@ import {
   nowIso,
   truncatePreview,
 } from "./bridge-utils.ts";
-import { AbstractPtyAdapter } from "./bridge-adapters.core.ts";
-import * as shared from "./bridge-adapters.shared.ts";
 
 type ShellRuntime = shared.ShellRuntime;
 
@@ -74,7 +74,7 @@ export class ShellAdapter extends AbstractPtyAdapter {
   protected afterStart(): void {
     if (this.options.profile) {
       this.writeToPty(
-        `${buildShellProfileCommand(this.options.profile, this.getShellRuntime().family)}\r`,
+        `${buildShellProfileCommand(this.options.profile, this.getShellRuntime().family)}\r`
       );
     }
 
@@ -89,10 +89,14 @@ export class ShellAdapter extends AbstractPtyAdapter {
       throw new Error("shell adapter is not running.");
     }
     if (this.state.status === "busy") {
-      throw new Error("shell is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "shell is still working. Wait for the current reply or use /stop."
+      );
     }
     if (this.pendingApproval || this.state.status === "awaiting_approval") {
-      throw new Error("A shell approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "A shell approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
 
     const rejectionMessage = getInteractiveShellCommandRejectionMessage(text);
@@ -110,7 +114,10 @@ export class ShellAdapter extends AbstractPtyAdapter {
       this.pendingApproval = request;
       this.state.pendingApproval = request;
       this.state.pendingApprovalOrigin = "wechat";
-      this.setStatus("awaiting_approval", "Waiting for shell command approval.");
+      this.setStatus(
+        "awaiting_approval",
+        "Waiting for shell command approval."
+      );
       this.emit({
         type: "approval_required",
         request,
@@ -131,19 +138,22 @@ export class ShellAdapter extends AbstractPtyAdapter {
     this.clearInterruptTimer();
     this.interruptTimer = setTimeout(() => {
       this.interruptTimer = null;
-      if (this.state.status === "busy" || this.state.status === "awaiting_approval") {
+      if (
+        this.state.status === "busy" ||
+        this.state.status === "awaiting_approval"
+      ) {
         this.finishShellCommand({
           summary: "Interrupted",
           statusMessage: "Shell command interrupted.",
         });
       }
-    }, 1_500);
+    }, 1500);
     return true;
   }
 
   protected override async applyApproval(
     action: "confirm" | "deny",
-    _pendingApproval: ApprovalRequest,
+    _pendingApproval: ApprovalRequest
   ): Promise<boolean> {
     if (!this.pendingApproval) {
       return false;
@@ -210,7 +220,7 @@ export class ShellAdapter extends AbstractPtyAdapter {
     const payload = buildShellInputPayload(
       text,
       this.getShellRuntime().family,
-      completionMarker,
+      completionMarker
     );
 
     this.hasAcceptedInput = true;
@@ -249,7 +259,7 @@ export class ShellAdapter extends AbstractPtyAdapter {
     let completedExitCode: number | null = null;
 
     for (const rawLine of chunk.split("\n")) {
-      if (!rawLine && !force) {
+      if (!(rawLine || force)) {
         continue;
       }
 
@@ -297,14 +307,13 @@ export class ShellAdapter extends AbstractPtyAdapter {
       return null;
     }
 
-    if (this.getShellRuntime().family === "posix") {
-      if (
-        trimmed === "__wechat_bridge_status=$?" ||
+    if (
+      this.getShellRuntime().family === "posix" &&
+      (trimmed === "__wechat_bridge_status=$?" ||
         trimmed.startsWith("printf '%s:%s\\n'") ||
-        trimmed.startsWith("printf '__WECHAT_BRIDGE_DONE__:%s")
-      ) {
-        return null;
-      }
+        trimmed.startsWith("printf '__WECHAT_BRIDGE_DONE__:%s"))
+    ) {
+      return null;
     }
 
     return cleanedLine;
@@ -327,7 +336,9 @@ export class ShellAdapter extends AbstractPtyAdapter {
   private normalizeEchoLine(line: string): string {
     const trimmed = line.trim();
     if (this.getShellRuntime().family === "powershell") {
-      return trimmed.replace(/^(?:PS [^>]*>\s*|PS>\s*|>>\s*|>\s*)+/u, "").trim();
+      return trimmed
+        .replace(/^(?:PS [^>]*>\s*|PS>\s*|>>\s*|>\s*)+/u, "")
+        .trim();
     }
     return trimmed.replace(/^(?:[$#>]\s*)+/u, "").trim();
   }
@@ -376,10 +387,7 @@ export class ShellAdapter extends AbstractPtyAdapter {
   }
 
   private resetShellCommandState(
-    options: {
-      preserveStatus?: boolean;
-      preservePreview?: boolean;
-    } = {},
+    options: { preserveStatus?: boolean; preservePreview?: boolean } = {}
   ): void {
     this.clearInterruptTimer();
     this.clearCompletionTimer();

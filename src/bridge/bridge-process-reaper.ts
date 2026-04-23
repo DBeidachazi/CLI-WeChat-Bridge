@@ -7,7 +7,7 @@ export type BridgeProcessRecord = {
   commandLine: string;
 };
 
-const PEER_BRIDGE_EXIT_TIMEOUT_MS = 4_000;
+const PEER_BRIDGE_EXIT_TIMEOUT_MS = 4000;
 const PEER_BRIDGE_EXIT_POLL_MS = 100;
 
 function isPidAlive(pid: number): boolean {
@@ -62,7 +62,9 @@ export function isOpencodeAttachCommandLine(commandLine: string): boolean {
   return /\bopencode(?:\.exe|\.cmd|\.bat)?\b.*\battach\b/i.test(commandLine);
 }
 
-function normalizeBridgeProcessRecord(value: unknown): BridgeProcessRecord | null {
+function normalizeBridgeProcessRecord(
+  value: unknown
+): BridgeProcessRecord | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -93,7 +95,11 @@ function normalizeBridgeProcessRecord(value: unknown): BridgeProcessRecord | nul
       : typeof value.parentPid === "number"
         ? value.parentPid
         : undefined;
-  if (typeof parentPid === "number" && Number.isInteger(parentPid) && parentPid > 0) {
+  if (
+    typeof parentPid === "number" &&
+    Number.isInteger(parentPid) &&
+    parentPid > 0
+  ) {
     record.parentPid = parentPid;
   }
   const name =
@@ -111,7 +117,7 @@ function normalizeBridgeProcessRecord(value: unknown): BridgeProcessRecord | nul
 
 export function parseWindowsBridgeProcessProbeOutput(
   stdout: string,
-  currentPid = process.pid,
+  currentPid = process.pid
 ): BridgeProcessRecord[] {
   const trimmed = stdout.trim();
   if (!trimmed) {
@@ -130,13 +136,15 @@ export function parseWindowsBridgeProcessProbeOutput(
     .map(normalizeBridgeProcessRecord)
     .filter((record): record is BridgeProcessRecord => Boolean(record))
     .filter(
-      (record) => record.pid !== currentPid && isWechatBridgeCommandLine(record.commandLine),
+      (record) =>
+        record.pid !== currentPid &&
+        isWechatBridgeCommandLine(record.commandLine)
     );
 }
 
 export function parsePosixBridgeProcessProbeOutput(
   stdout: string,
-  currentPid = process.pid,
+  currentPid = process.pid
 ): BridgeProcessRecord[] {
   return stdout
     .split(/\r?\n/)
@@ -159,11 +167,15 @@ export function parsePosixBridgeProcessProbeOutput(
     })
     .filter((record): record is BridgeProcessRecord => Boolean(record))
     .filter(
-      (record) => record.pid !== currentPid && isWechatBridgeCommandLine(record.commandLine),
+      (record) =>
+        record.pid !== currentPid &&
+        isWechatBridgeCommandLine(record.commandLine)
     );
 }
 
-function listWindowsBridgeProcesses(currentPid = process.pid): BridgeProcessRecord[] {
+function listWindowsBridgeProcesses(
+  currentPid = process.pid
+): BridgeProcessRecord[] {
   const probe = spawnSync(
     "powershell.exe",
     [
@@ -184,8 +196,8 @@ function listWindowsBridgeProcesses(currentPid = process.pid): BridgeProcessReco
     {
       encoding: "utf8",
       windowsHide: true,
-      timeout: 8_000,
-    },
+      timeout: 8000,
+    }
   );
 
   if (probe.status !== 0 || typeof probe.stdout !== "string") {
@@ -195,15 +207,13 @@ function listWindowsBridgeProcesses(currentPid = process.pid): BridgeProcessReco
   return parseWindowsBridgeProcessProbeOutput(probe.stdout, currentPid);
 }
 
-function listPosixBridgeProcesses(currentPid = process.pid): BridgeProcessRecord[] {
-  const probe = spawnSync(
-    "ps",
-    ["-ax", "-o", "pid=", "-o", "command="],
-    {
-      encoding: "utf8",
-      timeout: 8_000,
-    },
-  );
+function listPosixBridgeProcesses(
+  currentPid = process.pid
+): BridgeProcessRecord[] {
+  const probe = spawnSync("ps", ["-ax", "-o", "pid=", "-o", "command="], {
+    encoding: "utf8",
+    timeout: 8000,
+  });
 
   if (probe.status !== 0 || typeof probe.stdout !== "string") {
     return [];
@@ -212,7 +222,9 @@ function listPosixBridgeProcesses(currentPid = process.pid): BridgeProcessRecord
   return parsePosixBridgeProcessProbeOutput(probe.stdout, currentPid);
 }
 
-export function listPeerBridgeProcesses(currentPid = process.pid): BridgeProcessRecord[] {
+export function listPeerBridgeProcesses(
+  currentPid = process.pid
+): BridgeProcessRecord[] {
   return process.platform === "win32"
     ? listWindowsBridgeProcesses(currentPid)
     : listPosixBridgeProcesses(currentPid);
@@ -225,13 +237,15 @@ export function listPeerBridgeProcesses(currentPid = process.pid): BridgeProcess
  * OpenCode processes.
  */
 export function listOrphanedOpencodeProcesses(
-  currentPid = process.pid,
+  currentPid = process.pid
 ): BridgeProcessRecord[] {
   const all = listAllProcessesRaw(currentPid);
   return all.filter((record) => {
     if (
-      !isOpencodeServeCommandLine(record.commandLine) &&
-      !isOpencodeAttachCommandLine(record.commandLine)
+      !(
+        isOpencodeServeCommandLine(record.commandLine) ||
+        isOpencodeAttachCommandLine(record.commandLine)
+      )
     ) {
       return false;
     }
@@ -267,8 +281,8 @@ function listAllProcessesRaw(currentPid = process.pid): BridgeProcessRecord[] {
       {
         encoding: "utf8",
         windowsHide: true,
-        timeout: 8_000,
-      },
+        timeout: 8000,
+      }
     );
 
     if (probe.status !== 0 || typeof probe.stdout !== "string") {
@@ -276,7 +290,9 @@ function listAllProcessesRaw(currentPid = process.pid): BridgeProcessRecord[] {
     }
 
     const trimmed = probe.stdout.trim();
-    if (!trimmed) return [];
+    if (!trimmed) {
+      return [];
+    }
     try {
       const parsed = JSON.parse(trimmed);
       const values = Array.isArray(parsed) ? parsed : [parsed];
@@ -289,10 +305,14 @@ function listAllProcessesRaw(currentPid = process.pid): BridgeProcessRecord[] {
     }
   }
 
-  const probe = spawnSync("ps", ["-ax", "-o", "pid=", "-o", "ppid=", "-o", "command="], {
-    encoding: "utf8",
-    timeout: 8_000,
-  });
+  const probe = spawnSync(
+    "ps",
+    ["-ax", "-o", "pid=", "-o", "ppid=", "-o", "command="],
+    {
+      encoding: "utf8",
+      timeout: 8000,
+    }
+  );
 
   if (probe.status !== 0 || typeof probe.stdout !== "string") {
     return [];
@@ -304,20 +324,29 @@ function listAllProcessesRaw(currentPid = process.pid): BridgeProcessRecord[] {
     .filter(Boolean)
     .map((line) => {
       const match = /^(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-      if (!match) return null;
+      if (!match) {
+        return null;
+      }
       const pid = Number(match[1]);
       const parentPid = Number(match[2]);
       const commandLine = match[3] ?? "";
-      if (!Number.isInteger(pid) || pid <= 0 || !commandLine) return null;
+      if (!Number.isInteger(pid) || pid <= 0 || !commandLine) {
+        return null;
+      }
       const record: BridgeProcessRecord = { pid, commandLine };
-      if (Number.isInteger(parentPid) && parentPid > 0) record.parentPid = parentPid;
+      if (Number.isInteger(parentPid) && parentPid > 0) {
+        record.parentPid = parentPid;
+      }
       return record;
     })
     .filter((r): r is BridgeProcessRecord => Boolean(r))
     .filter((r) => r.pid !== currentPid);
 }
 
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!isPidAlive(pid)) {
@@ -342,20 +371,27 @@ export function killProcessTreeSync(pid: number): void {
     try {
       spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
         windowsHide: true,
-        timeout: 5_000,
+        timeout: 5000,
       });
     } catch {
-      try { process.kill(pid); } catch { /* best effort */ }
+      try {
+        process.kill(pid);
+      } catch {
+        /* best effort */
+      }
     }
   } else {
-    try { process.kill(pid); } catch { /* best effort */ }
+    try {
+      process.kill(pid);
+    } catch {
+      /* best effort */
+    }
   }
 }
 
-export async function reapPeerBridgeProcesses(params: {
-  currentPid?: number;
-  logger?: (message: string) => void;
-} = {}): Promise<number[]> {
+export async function reapPeerBridgeProcesses(
+  params: { currentPid?: number; logger?: (message: string) => void } = {}
+): Promise<number[]> {
   const currentPid = params.currentPid ?? process.pid;
   const peers = listPeerBridgeProcesses(currentPid);
   const terminated: number[] = [];
@@ -363,7 +399,7 @@ export async function reapPeerBridgeProcesses(params: {
   for (const peer of peers) {
     try {
       params.logger?.(
-        `peer_bridge_reap_attempt: pid=${peer.pid}${peer.name ? ` name=${peer.name}` : ""} command=${peer.commandLine}`,
+        `peer_bridge_reap_attempt: pid=${peer.pid}${peer.name ? ` name=${peer.name}` : ""} command=${peer.commandLine}`
       );
       killProcessTreeSync(peer.pid);
       if (await waitForProcessExit(peer.pid, PEER_BRIDGE_EXIT_TIMEOUT_MS)) {
@@ -374,7 +410,9 @@ export async function reapPeerBridgeProcesses(params: {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      params.logger?.(`peer_bridge_reap_failed: pid=${peer.pid} error=${message}`);
+      params.logger?.(
+        `peer_bridge_reap_failed: pid=${peer.pid} error=${message}`
+      );
     }
   }
 
@@ -387,10 +425,9 @@ export async function reapPeerBridgeProcesses(params: {
  * or is killed without cleaning up its child OpenCode processes (common on
  * Windows where child processes are not automatically killed when the parent dies).
  */
-export async function reapOrphanedOpencodeProcesses(params: {
-  currentPid?: number;
-  logger?: (message: string) => void;
-} = {}): Promise<number[]> {
+export async function reapOrphanedOpencodeProcesses(
+  params: { currentPid?: number; logger?: (message: string) => void } = {}
+): Promise<number[]> {
   const currentPid = params.currentPid ?? process.pid;
   const orphans = listOrphanedOpencodeProcesses(currentPid);
   const terminated: number[] = [];
@@ -398,7 +435,7 @@ export async function reapOrphanedOpencodeProcesses(params: {
   for (const orphan of orphans) {
     try {
       params.logger?.(
-        `orphan_opencode_reap_attempt: pid=${orphan.pid}${orphan.name ? ` name=${orphan.name}` : ""} parentPid=${orphan.parentPid} command=${orphan.commandLine}`,
+        `orphan_opencode_reap_attempt: pid=${orphan.pid}${orphan.name ? ` name=${orphan.name}` : ""} parentPid=${orphan.parentPid} command=${orphan.commandLine}`
       );
       killProcessTreeSync(orphan.pid);
       if (await waitForProcessExit(orphan.pid, PEER_BRIDGE_EXIT_TIMEOUT_MS)) {
@@ -409,7 +446,9 @@ export async function reapOrphanedOpencodeProcesses(params: {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      params.logger?.(`orphan_opencode_reap_failed: pid=${orphan.pid} error=${message}`);
+      params.logger?.(
+        `orphan_opencode_reap_failed: pid=${orphan.pid} error=${message}`
+      );
     }
   }
 

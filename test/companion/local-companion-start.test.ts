@@ -15,7 +15,7 @@ describe("local-companion-start helpers", () => {
     const options = parseCliArgs([]);
     expect(options.adapter).toBe("codex");
     expect(options.cwd).toBe(process.cwd());
-    expect(options.timeoutMs).toBe(15000);
+    expect(options.timeoutMs).toBe(15_000);
   });
 
   test("parseCliArgs parses adapter, cwd, profile, and timeout", () => {
@@ -33,7 +33,7 @@ describe("local-companion-start helpers", () => {
     expect(options.adapter).toBe("claude");
     expect(options.cwd).toBe(path.resolve("./tmp/project"));
     expect(options.profile).toBe("work");
-    expect(options.timeoutMs).toBe(25000);
+    expect(options.timeoutMs).toBe(25_000);
   });
 
   test("buildBackgroundBridgeArgs binds codex background bridge to the launcher lifetime", () => {
@@ -41,7 +41,7 @@ describe("local-companion-start helpers", () => {
       adapter: "codex",
       cwd: path.resolve("./tmp/project"),
       profile: "work",
-      timeoutMs: 15000,
+      timeoutMs: 15_000,
     });
 
     expect(args).toEqual([
@@ -65,9 +65,9 @@ describe("local-companion-start helpers", () => {
       {
         adapter: "gemini",
         cwd: path.resolve("./tmp/project"),
-        timeoutMs: 15000,
+        timeoutMs: 15_000,
       },
-      "persistent",
+      "persistent"
     );
 
     expect(args).toEqual([
@@ -87,7 +87,7 @@ describe("local-companion-start helpers", () => {
     const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
       adapter: "claude",
       cwd: path.resolve("./tmp/project"),
-      timeoutMs: 15000,
+      timeoutMs: 15_000,
     });
 
     expect(args).toEqual([
@@ -107,7 +107,7 @@ describe("local-companion-start helpers", () => {
     const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
       adapter: "opencode",
       cwd: path.resolve("./tmp/project"),
-      timeoutMs: 15000,
+      timeoutMs: 15_000,
     });
 
     expect(args).toEqual([
@@ -125,10 +125,10 @@ describe("local-companion-start helpers", () => {
 
   test("resolveForegroundClientEntryPath always launches the shared local companion entry", () => {
     expect(resolveForegroundClientEntryPath("codex")).toBe(
-      path.resolve(process.cwd(), "src", "companion", "local-companion.ts"),
+      path.resolve(process.cwd(), "src", "companion", "local-companion.ts")
     );
     expect(resolveForegroundClientEntryPath("opencode")).toBe(
-      path.resolve(process.cwd(), "src", "companion", "local-companion.ts"),
+      path.resolve(process.cwd(), "src", "companion", "local-companion.ts")
     );
   });
 
@@ -136,7 +136,7 @@ describe("local-companion-start helpers", () => {
     const args = buildForegroundClientArgs("/tmp/local-companion.ts", {
       adapter: "opencode",
       cwd: path.resolve("./tmp/project"),
-      timeoutMs: 15000,
+      timeoutMs: 15_000,
     });
 
     expect(args).toEqual([
@@ -154,7 +154,7 @@ describe("local-companion-start helpers", () => {
     const args = buildForegroundClientArgs("/tmp/local-companion.ts", {
       adapter: "claude",
       cwd: path.resolve("./tmp/project"),
-      timeoutMs: 15000,
+      timeoutMs: 15_000,
     });
 
     expect(args).toEqual([

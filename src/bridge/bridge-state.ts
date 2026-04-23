@@ -3,8 +3,8 @@ import fs from "node:fs";
 import {
   BRIDGE_LOCK_FILE,
   BRIDGE_LOG_FILE,
-  ensureWorkspaceChannelDir,
   ensureChannelDataDir,
+  ensureWorkspaceChannelDir,
 } from "../wechat/channel-config.ts";
 import type {
   BridgeAdapterKind,
@@ -52,7 +52,7 @@ export type BridgeRuntimeOwnership =
       activePid: number;
     };
 
-const ORPHAN_LOCK_RECLAIM_TIMEOUT_MS = 2_000;
+const ORPHAN_LOCK_RECLAIM_TIMEOUT_MS = 2000;
 const ORPHAN_LOCK_RECLAIM_POLL_MS = 100;
 
 export function shouldReusePersistedBridgeSession(params: {
@@ -96,7 +96,7 @@ function sleepSync(ms: number): void {
 function waitForProcessExitSync(
   pid: number,
   timeoutMs: number,
-  isProcessAlive: (pid: number) => boolean = isPidAlive,
+  isProcessAlive: (pid: number) => boolean = isPidAlive
 ): boolean {
   const deadline = Date.now() + timeoutMs;
 
@@ -110,7 +110,9 @@ function waitForProcessExitSync(
   return !isProcessAlive(pid);
 }
 
-export function normalizeBridgeLockPayload(value: unknown): BridgeLockPayload | null {
+export function normalizeBridgeLockPayload(
+  value: unknown
+): BridgeLockPayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -151,7 +153,8 @@ export function normalizeBridgeLockPayload(value: unknown): BridgeLockPayload | 
     command: record.command,
     cwd: record.cwd,
     startedAt: record.startedAt,
-    lifecycle: record.lifecycle === "companion_bound" ? "companion_bound" : "persistent",
+    lifecycle:
+      record.lifecycle === "companion_bound" ? "companion_bound" : "persistent",
     legacyLifecycleFallback: hasExplicitLifecycle ? undefined : true,
   };
 }
@@ -161,7 +164,9 @@ export function readBridgeLockFile(): BridgeLockPayload | null {
     if (!fs.existsSync(BRIDGE_LOCK_FILE)) {
       return null;
     }
-    return normalizeBridgeLockPayload(JSON.parse(fs.readFileSync(BRIDGE_LOCK_FILE, "utf-8")));
+    return normalizeBridgeLockPayload(
+      JSON.parse(fs.readFileSync(BRIDGE_LOCK_FILE, "utf-8"))
+    );
   } catch {
     return null;
   }
@@ -169,7 +174,7 @@ export function readBridgeLockFile(): BridgeLockPayload | null {
 
 export function shouldAutoReclaimBridgeLock(
   lock: BridgeLockPayload,
-  isProcessAlive: (pid: number) => boolean = isPidAlive,
+  isProcessAlive: (pid: number) => boolean = isPidAlive
 ): boolean {
   if (
     lock.lifecycle === "companion_bound" ||
@@ -237,7 +242,7 @@ export function evaluateBridgeRuntimeOwnership(params: {
 
 function buildLockConflictError(lock: BridgeLockPayload): Error {
   return new Error(
-    `Another bridge instance is already running (pid=${lock.pid}, instanceId=${lock.instanceId}, adapter=${lock.adapter}, cwd=${lock.cwd}, startedAt=${lock.startedAt}, lifecycle=${lock.lifecycle}). Stop it before starting a new bridge.`,
+    `Another bridge instance is already running (pid=${lock.pid}, instanceId=${lock.instanceId}, adapter=${lock.adapter}, cwd=${lock.cwd}, startedAt=${lock.startedAt}, lifecycle=${lock.lifecycle}). Stop it before starting a new bridge.`
   );
 }
 
@@ -279,15 +284,14 @@ export class BridgeStateStore {
     this.acquireLock();
 
     const persisted = this.readStateFile();
-    const persistedSharedSessionId =
-      shouldReusePersistedBridgeSession({
-        currentAdapter: options.adapter,
-        currentCwd: options.cwd,
-        persistedAdapter: persisted?.adapter,
-        persistedCwd: persisted?.cwd,
-      })
-        ? persisted.sharedSessionId ?? persisted.sharedThreadId
-        : undefined;
+    const persistedSharedSessionId = shouldReusePersistedBridgeSession({
+      currentAdapter: options.adapter,
+      currentCwd: options.cwd,
+      persistedAdapter: persisted?.adapter,
+      persistedCwd: persisted?.cwd,
+    })
+      ? (persisted.sharedSessionId ?? persisted.sharedThreadId)
+      : undefined;
     const persistedResumeConversationId =
       options.adapter === "claude" &&
       shouldReusePersistedBridgeSession({
@@ -331,7 +335,9 @@ export class BridgeStateStore {
     this.save();
 
     if (persisted?.pendingConfirmation) {
-      this.appendLog("Cleared stale pending confirmation from previous bridge session.");
+      this.appendLog(
+        "Cleared stale pending confirmation from previous bridge session."
+      );
     }
   }
 
@@ -362,7 +368,11 @@ export class BridgeStateStore {
     this.save();
   }
 
-  setAdapterSelection(adapter: BridgeAdapterKind, command: string, profile?: string): void {
+  setAdapterSelection(
+    adapter: BridgeAdapterKind,
+    command: string,
+    profile?: string
+  ): void {
     this.state.adapter = adapter;
     this.state.command = command;
     this.state.profile = profile;
@@ -376,7 +386,8 @@ export class BridgeStateStore {
 
   setSharedSessionId(sessionId: string): void {
     this.state.sharedSessionId = sessionId;
-    this.state.sharedThreadId = this.state.adapter === "codex" ? sessionId : undefined;
+    this.state.sharedThreadId =
+      this.state.adapter === "codex" ? sessionId : undefined;
     this.save();
   }
 
@@ -385,7 +396,7 @@ export class BridgeStateStore {
   }
 
   clearSharedSessionId(): void {
-    if (!this.state.sharedSessionId && !this.state.sharedThreadId) {
+    if (!(this.state.sharedSessionId || this.state.sharedThreadId)) {
       return;
     }
     this.state.sharedSessionId = undefined;
@@ -397,7 +408,10 @@ export class BridgeStateStore {
     this.clearSharedSessionId();
   }
 
-  setClaudeResumeState(resumeConversationId?: string, transcriptPath?: string): void {
+  setClaudeResumeState(
+    resumeConversationId?: string,
+    transcriptPath?: string
+  ): void {
     if (this.state.adapter !== "claude") {
       return;
     }
@@ -410,7 +424,7 @@ export class BridgeStateStore {
   clearClaudeResumeState(): void {
     if (
       this.state.adapter !== "claude" ||
-      (!this.state.resumeConversationId && !this.state.transcriptPath)
+      !(this.state.resumeConversationId || this.state.transcriptPath)
     ) {
       return;
     }
@@ -425,7 +439,7 @@ export class BridgeStateStore {
     fs.appendFileSync(
       BRIDGE_LOG_FILE,
       `[${new Date().toISOString()}] ${message}\n`,
-      "utf-8",
+      "utf-8"
     );
   }
 
@@ -442,34 +456,34 @@ export class BridgeStateStore {
 
   private save(): void {
     ensureChannelDataDir();
-    fs.writeFileSync(this.stateFilePath, JSON.stringify(this.state, null, 2), "utf-8");
+    fs.writeFileSync(
+      this.stateFilePath,
+      JSON.stringify(this.state, null, 2),
+      "utf-8"
+    );
   }
 
   private acquireLock(): void {
     const existing = readBridgeLockFile();
-    if (
-      existing &&
-      existing.pid !== process.pid &&
-      isPidAlive(existing.pid)
-    ) {
+    if (existing && existing.pid !== process.pid && isPidAlive(existing.pid)) {
       if (shouldAutoReclaimBridgeLock(existing)) {
         this.appendLog(
-          `lock_reclaim_attempt: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`,
+          `lock_reclaim_attempt: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`
         );
 
         if (tryTerminateOrphanedBridge(existing)) {
           this.appendLog(
-            `lock_reclaimed: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`,
+            `lock_reclaimed: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`
           );
         } else {
           this.appendLog(
-            `lock_reclaim_failed: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`,
+            `lock_reclaim_failed: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`
           );
           throw buildLockConflictError(existing);
         }
       } else {
         this.appendLog(
-          `lock_conflict: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`,
+          `lock_conflict: pid=${existing.pid} instanceId=${existing.instanceId} adapter=${existing.adapter} cwd=${existing.cwd}`
         );
         throw buildLockConflictError(existing);
       }
@@ -478,7 +492,7 @@ export class BridgeStateStore {
     fs.writeFileSync(
       BRIDGE_LOCK_FILE,
       JSON.stringify(this.lockPayload, null, 2),
-      "utf-8",
+      "utf-8"
     );
   }
 
@@ -506,7 +520,7 @@ export class BridgeStateStore {
       fs.writeFileSync(
         BRIDGE_LOCK_FILE,
         JSON.stringify(this.lockPayload, null, 2),
-        "utf-8",
+        "utf-8"
       );
     }
 
@@ -520,7 +534,7 @@ export class BridgeStateStore {
       }
 
       return JSON.parse(
-        fs.readFileSync(this.stateFilePath, "utf-8"),
+        fs.readFileSync(this.stateFilePath, "utf-8")
       ) as Partial<BridgeState>;
     } catch {
       return null;
@@ -534,7 +548,7 @@ export class BridgeStateStore {
       }
 
       return JSON.parse(
-        fs.readFileSync(this.stateFilePath, "utf-8"),
+        fs.readFileSync(this.stateFilePath, "utf-8")
       ) as Partial<BridgeState>;
     } catch {
       return null;

@@ -4,8 +4,8 @@ import {
   buildClaudeFailureMessage,
   buildClaudeHookScript,
   buildClaudeHookSettings,
-  buildClaudePermissionDecisionHookOutput,
   buildClaudePermissionApprovalRequest,
+  buildClaudePermissionDecisionHookOutput,
   extractClaudeAssistantMessageText,
   extractClaudeResumeConversationId,
   extractClaudeTranscriptFinalReply,
@@ -21,8 +21,8 @@ describe("parseClaudeHookPayload", () => {
         JSON.stringify({
           hook_event_name: "SessionStart",
           session_id: "session-123",
-        }),
-      ),
+        })
+      )
     ).toEqual({
       hook_event_name: "SessionStart",
       session_id: "session-123",
@@ -57,14 +57,14 @@ describe("buildClaudeHookScript", () => {
       platform: "win32",
       runtimeExecPath: "C:\\Program Files\\nodejs\\node.exe",
       hookEntryPath: "C:\\repo\\src\\bridge\\claude-hook.ts",
-      hookPort: 43123,
+      hookPort: 43_123,
       hookToken: "token-123",
     });
 
     expect(script).toContain('set "CLAUDE_WECHAT_HOOK_PORT=43123"');
     expect(script).toContain('set "CLAUDE_WECHAT_HOOK_TOKEN=token-123"');
-    expect(script).toContain('2>nul');
-    expect(script).not.toContain('>nul 2>nul');
+    expect(script).toContain("2>nul");
+    expect(script).not.toContain(">nul 2>nul");
   });
 
   test("preserves stdout on POSIX so Claude can read remote approval decisions", () => {
@@ -72,7 +72,7 @@ describe("buildClaudeHookScript", () => {
       platform: "linux",
       runtimeExecPath: "/usr/local/bin/node",
       hookEntryPath: "/repo/src/bridge/claude-hook.ts",
-      hookPort: 43123,
+      hookPort: 43_123,
       hookToken: "token-123",
     });
 
@@ -91,7 +91,7 @@ describe("buildClaudePermissionApprovalRequest", () => {
         tool_input: {
           command: "npm test",
         },
-      }),
+      })
     ).toMatchObject({
       source: "cli",
       summary: "Claude permission is required for Bash.",
@@ -109,7 +109,7 @@ describe("buildClaudePermissionApprovalRequest", () => {
         tool_input: {
           plan: "# 示例任务：创建项目初始化脚本\n\n创建一个 Python 项目初始化脚本，用于快速设置新项目的基础结构。\n\n## 实现方案\n1. 创建主脚本",
         },
-      }),
+      })
     ).toMatchObject({
       source: "cli",
       summary: "Claude permission is required for ExitPlanMode.",
@@ -125,7 +125,9 @@ describe("buildClaudePermissionApprovalRequest", () => {
 
 describe("buildClaudePermissionDecisionHookOutput", () => {
   test("builds an allow decision for remote confirmation", () => {
-    expect(JSON.parse(buildClaudePermissionDecisionHookOutput("confirm"))).toEqual({
+    expect(
+      JSON.parse(buildClaudePermissionDecisionHookOutput("confirm"))
+    ).toEqual({
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
         decision: {
@@ -136,16 +138,18 @@ describe("buildClaudePermissionDecisionHookOutput", () => {
   });
 
   test("builds a deny decision for remote rejection", () => {
-    expect(JSON.parse(buildClaudePermissionDecisionHookOutput("deny"))).toEqual({
-      hookSpecificOutput: {
-        hookEventName: "PermissionRequest",
-        decision: {
-          behavior: "deny",
-          message: "Permission denied from WeChat bridge.",
-          interrupt: false,
+    expect(JSON.parse(buildClaudePermissionDecisionHookOutput("deny"))).toEqual(
+      {
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "deny",
+            message: "Permission denied from WeChat bridge.",
+            interrupt: false,
+          },
         },
-      },
-    });
+      }
+    );
   });
 });
 
@@ -153,14 +157,16 @@ describe("extractClaudeResumeConversationId", () => {
   test("extracts the resume conversation id from a transcript path", () => {
     expect(
       extractClaudeResumeConversationId(
-        "C:\\Users\\tester\\.claude\\projects\\repo\\3622cdda-de96-4ba3-9982-66f1dd56c676.jsonl",
-      ),
+        "C:\\Users\\tester\\.claude\\projects\\repo\\3622cdda-de96-4ba3-9982-66f1dd56c676.jsonl"
+      )
     ).toBe("3622cdda-de96-4ba3-9982-66f1dd56c676");
   });
 
   test("returns null when the transcript path is missing or malformed", () => {
     expect(extractClaudeResumeConversationId(undefined)).toBeNull();
-    expect(extractClaudeResumeConversationId("C:\\tmp\\session.txt")).toBeNull();
+    expect(
+      extractClaudeResumeConversationId("C:\\tmp\\session.txt")
+    ).toBeNull();
   });
 });
 
@@ -169,7 +175,7 @@ describe("normalizeClaudeAssistantMessage", () => {
     expect(
       normalizeClaudeAssistantMessage({
         last_assistant_message: "Done.\r\n\r\nSummary",
-      }),
+      })
     ).toBe("Done.\n\nSummary");
   });
 
@@ -199,7 +205,9 @@ describe("extractClaudeTranscriptFinalReply", () => {
         type: "assistant",
         message: {
           role: "assistant",
-          content: [{ type: "tool_use", id: "call_1", name: "Read", input: {} }],
+          content: [
+            { type: "tool_use", id: "call_1", name: "Read", input: {} },
+          ],
           stop_reason: "tool_use",
         },
       }),
@@ -217,7 +225,9 @@ describe("extractClaudeTranscriptFinalReply", () => {
       }),
     ].join("\n");
 
-    expect(extractClaudeTranscriptFinalReply(transcript)).toBe("Recovered.\n\nSummary");
+    expect(extractClaudeTranscriptFinalReply(transcript)).toBe(
+      "Recovered.\n\nSummary"
+    );
   });
 });
 
@@ -227,7 +237,7 @@ describe("buildClaudeFailureMessage", () => {
       buildClaudeFailureMessage({
         last_assistant_message: "API Error: Rate limit reached",
         error_details: "429 Too Many Requests",
-      }),
+      })
     ).toContain("API Error: Rate limit reached");
   });
 });
@@ -239,8 +249,8 @@ describe("findInjectedClaudePromptIndex", () => {
       findInjectedClaudePromptIndex(
         "Review the README",
         [{ normalizedText: "Review the README", createdAtMs: now - 1000 }],
-        now,
-      ),
+        now
+      )
     ).toBe(0);
   });
 
@@ -250,8 +260,8 @@ describe("findInjectedClaudePromptIndex", () => {
       findInjectedClaudePromptIndex(
         "Review the README",
         [{ normalizedText: "Review the README", createdAtMs: now - 20_000 }],
-        now,
-      ),
+        now
+      )
     ).toBe(-1);
   });
 });

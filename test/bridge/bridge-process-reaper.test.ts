@@ -12,38 +12,66 @@ describe("bridge peer process reaper", () => {
   test("detects wechat-bridge command lines", () => {
     expect(
       isWechatBridgeCommandLine(
-        '"C:\\Program Files\\nodejs\\node.exe" --no-warnings --experimental-strip-types C:\\repo\\src\\bridge\\wechat-bridge.ts --adapter opencode --cwd C:\\Users\\unlin',
-      ),
+        '"C:\\Program Files\\nodejs\\node.exe" --no-warnings --experimental-strip-types C:\\repo\\src\\bridge\\wechat-bridge.ts --adapter opencode --cwd C:\\Users\\unlin'
+      )
     ).toBe(true);
     expect(
       isWechatBridgeCommandLine(
-        '"C:\\Program Files\\nodejs\\node.exe" --no-warnings --experimental-strip-types C:\\repo\\src\\companion\\local-companion-start.ts --adapter opencode',
-      ),
+        '"C:\\Program Files\\nodejs\\node.exe" --no-warnings --experimental-strip-types C:\\repo\\src\\companion\\local-companion-start.ts --adapter opencode'
+      )
     ).toBe(false);
   });
 
   test("detects opencode serve command lines", () => {
-    expect(isOpencodeServeCommandLine("opencode serve --port 12345 --hostname 127.0.0.1")).toBe(true);
-    expect(isOpencodeServeCommandLine("opencode.exe serve --port 12345")).toBe(true);
-    expect(isOpencodeServeCommandLine("opencode.cmd serve --port 12345")).toBe(true);
-    expect(isOpencodeServeCommandLine("opencode.bat serve --port 12345")).toBe(true);
-    expect(isOpencodeServeCommandLine("/usr/local/bin/opencode serve --port 12345")).toBe(true);
+    expect(
+      isOpencodeServeCommandLine(
+        "opencode serve --port 12345 --hostname 127.0.0.1"
+      )
+    ).toBe(true);
+    expect(isOpencodeServeCommandLine("opencode.exe serve --port 12345")).toBe(
+      true
+    );
+    expect(isOpencodeServeCommandLine("opencode.cmd serve --port 12345")).toBe(
+      true
+    );
+    expect(isOpencodeServeCommandLine("opencode.bat serve --port 12345")).toBe(
+      true
+    );
+    expect(
+      isOpencodeServeCommandLine("/usr/local/bin/opencode serve --port 12345")
+    ).toBe(true);
     expect(isOpencodeServeCommandLine("opencode chat")).toBe(false);
-    expect(isOpencodeServeCommandLine("node server.js --port 12345")).toBe(false);
+    expect(isOpencodeServeCommandLine("node server.js --port 12345")).toBe(
+      false
+    );
     expect(isOpencodeServeCommandLine("")).toBe(false);
   });
 
   test("detects opencode attach command lines", () => {
-    expect(isOpencodeAttachCommandLine("opencode attach http://127.0.0.1:12345")).toBe(true);
     expect(
-      isOpencodeAttachCommandLine("opencode.exe attach http://127.0.0.1:12345 --session ses_123"),
+      isOpencodeAttachCommandLine("opencode attach http://127.0.0.1:12345")
     ).toBe(true);
     expect(
-      isOpencodeAttachCommandLine("opencode.cmd attach http://127.0.0.1:12345 --session 019d2ebf"),
+      isOpencodeAttachCommandLine(
+        "opencode.exe attach http://127.0.0.1:12345 --session ses_123"
+      )
     ).toBe(true);
-    expect(isOpencodeAttachCommandLine("/usr/local/bin/opencode attach http://127.0.0.1:12345")).toBe(true);
-    expect(isOpencodeAttachCommandLine("opencode serve --port 12345")).toBe(false);
-    expect(isOpencodeAttachCommandLine("node attach.js http://127.0.0.1:12345")).toBe(false);
+    expect(
+      isOpencodeAttachCommandLine(
+        "opencode.cmd attach http://127.0.0.1:12345 --session 019d2ebf"
+      )
+    ).toBe(true);
+    expect(
+      isOpencodeAttachCommandLine(
+        "/usr/local/bin/opencode attach http://127.0.0.1:12345"
+      )
+    ).toBe(true);
+    expect(isOpencodeAttachCommandLine("opencode serve --port 12345")).toBe(
+      false
+    );
+    expect(
+      isOpencodeAttachCommandLine("node attach.js http://127.0.0.1:12345")
+    ).toBe(false);
     expect(isOpencodeAttachCommandLine("")).toBe(false);
   });
 
@@ -85,16 +113,16 @@ describe("bridge peer process reaper", () => {
 
   test("parses POSIX process probe output and ignores the current pid", () => {
     const output = [
-      '101 node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter opencode --cwd /tmp/work',
-      '202 node --no-warnings --experimental-strip-types /repo/src/companion/local-companion-start.ts --adapter opencode',
-      '303 node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter codex --cwd /repo',
+      "101 node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter opencode --cwd /tmp/work",
+      "202 node --no-warnings --experimental-strip-types /repo/src/companion/local-companion-start.ts --adapter opencode",
+      "303 node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter codex --cwd /repo",
     ].join("\n");
 
     expect(parsePosixBridgeProcessProbeOutput(output, 303)).toEqual([
       {
         pid: 101,
         commandLine:
-          'node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter opencode --cwd /tmp/work',
+          "node --no-warnings --experimental-strip-types /repo/src/bridge/wechat-bridge.ts --adapter opencode --cwd /tmp/work",
       },
     ]);
   });

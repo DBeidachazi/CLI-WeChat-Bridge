@@ -6,8 +6,8 @@ import path from "node:path";
 import {
   assertMediaUploadSizeAllowed,
   buildInboundMessageClaimPath,
-  clearInboundMessageClaims,
   classifyWechatTransportError,
+  clearInboundMessageClaims,
   decodeWechatAesKey,
   describeWechatTransportError,
   formatByteSize,
@@ -27,13 +27,13 @@ describe("wechat upload limits", () => {
     expect(
       resolveMediaUploadLimitBytes("video", {
         WECHAT_MAX_VIDEO_MB: "64",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toBe(64 * 1024 * 1024);
 
     expect(
       resolveMediaUploadLimitBytes("video", {
         WECHAT_MAX_VIDEO_MB: "not-a-number",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toBe(100 * 1024 * 1024);
   });
 
@@ -42,16 +42,16 @@ describe("wechat upload limits", () => {
       assertMediaUploadSizeAllowed(
         "video",
         377_800_000,
-        {} as NodeJS.ProcessEnv,
-      ),
+        {} as NodeJS.ProcessEnv
+      )
     ).toThrow(
-      "Video too large: 360 MB exceeds 100 MB limit. Set WECHAT_MAX_VIDEO_MB to override.",
+      "Video too large: 360 MB exceeds 100 MB limit. Set WECHAT_MAX_VIDEO_MB to override."
     );
   });
 
   test("formats byte sizes consistently", () => {
     expect(formatByteSize(512)).toBe("512 B");
-    expect(formatByteSize(1_536)).toBe("1.5 KB");
+    expect(formatByteSize(1536)).toBe("1.5 KB");
     expect(formatByteSize(20 * 1024 * 1024)).toBe("20.0 MB");
   });
 
@@ -59,19 +59,24 @@ describe("wechat upload limits", () => {
     const rawKey = Buffer.from("00112233445566778899aabbccddeeff", "hex");
 
     expect(
-      decodeWechatAesKey(undefined, "00112233445566778899aabbccddeeff")?.equals(rawKey),
+      decodeWechatAesKey(undefined, "00112233445566778899aabbccddeeff")?.equals(
+        rawKey
+      )
     ).toBe(true);
 
     expect(
       decodeWechatAesKey({
-        aes_key: Buffer.from("00112233445566778899aabbccddeeff", "utf8").toString("base64"),
-      })?.equals(rawKey),
+        aes_key: Buffer.from(
+          "00112233445566778899aabbccddeeff",
+          "utf8"
+        ).toString("base64"),
+      })?.equals(rawKey)
     ).toBe(true);
 
     expect(
       decodeWechatAesKey({
         aes_key: rawKey.toString("base64"),
-      })?.equals(rawKey),
+      })?.equals(rawKey)
     ).toBe(true);
   });
 
@@ -88,18 +93,24 @@ describe("wechat upload limits", () => {
       kind: "network",
       retryable: true,
     });
-    expect(describeWechatTransportError(error)).toContain("TypeError: fetch failed");
+    expect(describeWechatTransportError(error)).toContain(
+      "TypeError: fetch failed"
+    );
     expect(describeWechatTransportError(error)).toContain("code=ETIMEDOUT");
   });
 
   test("treats HTTP 503 as retryable and HTTP 401 as fatal auth", () => {
-    expect(classifyWechatTransportError(new Error("HTTP 503: upstream unavailable"))).toEqual({
+    expect(
+      classifyWechatTransportError(new Error("HTTP 503: upstream unavailable"))
+    ).toEqual({
       kind: "http",
       retryable: true,
       statusCode: 503,
     });
 
-    expect(classifyWechatTransportError(new Error("HTTP 401: unauthorized"))).toEqual({
+    expect(
+      classifyWechatTransportError(new Error("HTTP 401: unauthorized"))
+    ).toEqual({
       kind: "auth",
       retryable: false,
       statusCode: 401,
@@ -111,9 +122,15 @@ describe("wechat upload limits", () => {
     const scopedMessageKey = "account-1|sender|client|123|ctx";
 
     try {
-      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(true);
-      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(false);
-      expect(fs.existsSync(buildInboundMessageClaimPath(scopedMessageKey, claimsDir))).toBe(true);
+      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(
+        true
+      );
+      expect(tryClaimInboundMessage(scopedMessageKey, { claimsDir })).toBe(
+        false
+      );
+      expect(
+        fs.existsSync(buildInboundMessageClaimPath(scopedMessageKey, claimsDir))
+      ).toBe(true);
     } finally {
       clearInboundMessageClaims(claimsDir);
     }
@@ -130,10 +147,13 @@ describe("wechat upload limits", () => {
           claimsDir,
           nowMs,
           ttlMs: 1000,
-        }),
+        })
       ).toBe(true);
 
-      const claimPath = buildInboundMessageClaimPath(scopedMessageKey, claimsDir);
+      const claimPath = buildInboundMessageClaimPath(
+        scopedMessageKey,
+        claimsDir
+      );
       fs.utimesSync(claimPath, new Date(nowMs - 5000), new Date(nowMs - 5000));
 
       expect(
@@ -141,7 +161,7 @@ describe("wechat upload limits", () => {
           claimsDir,
           nowMs,
           ttlMs: 1000,
-        }),
+        })
       ).toBe(true);
     } finally {
       clearInboundMessageClaims(claimsDir);

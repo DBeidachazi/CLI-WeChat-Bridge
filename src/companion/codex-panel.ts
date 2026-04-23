@@ -4,13 +4,13 @@ import net from "node:net";
 import path from "node:path";
 
 import { createBridgeAdapter } from "../bridge/bridge-adapters.ts";
+import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 import {
   attachCodexPanelMessageListener,
+  type CodexPanelMessage,
   readCodexPanelEndpoint,
   sendCodexPanelMessage,
-  type CodexPanelMessage,
 } from "./codex-panel-link.ts";
-import { migrateLegacyChannelFiles } from "../wechat/channel-config.ts";
 
 function log(message: string): void {
   process.stderr.write(`[codex-panel] ${message}\n`);
@@ -34,7 +34,7 @@ function parseCliArgs(argv: string[]): CodexPanelCliOptions {
           "",
           'Starts the visible Codex panel and connects it to the running "wechat-bridge-codex" instance for the current directory.',
           "",
-        ].join("\n"),
+        ].join("\n")
       );
       process.exit(0);
     }
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   const endpoint = readCodexPanelEndpoint(options.cwd);
   if (!endpoint) {
     throw new Error(
-      `No active Codex bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-codex" in that directory first.`,
+      `No active Codex bridge endpoint was found for ${options.cwd}. Start "wechat-bridge-codex" in that directory first.`
     );
   }
 
@@ -97,7 +97,12 @@ async function main(): Promise<void> {
     });
   };
 
-  const sendResponse = (id: string, ok: boolean, result?: unknown, error?: string) => {
+  const sendResponse = (
+    id: string,
+    ok: boolean,
+    result?: unknown,
+    error?: string
+  ) => {
     sendCodexPanelMessage(socket, {
       type: "response",
       id,
@@ -137,69 +142,72 @@ async function main(): Promise<void> {
     publishState();
   });
 
-  detachListener = attachCodexPanelMessageListener(socket, (message: CodexPanelMessage) => {
-    if (!helloAcknowledged) {
-      if (message.type === "hello_ack") {
-        helloAcknowledged = true;
-      }
-      return;
-    }
-
-    if (message.type !== "request") {
-      return;
-    }
-
-    void (async () => {
-      try {
-        switch (message.payload.command) {
-          case "send_input":
-            await adapter.sendInput(message.payload.input);
-            sendResponse(message.id, true);
-            break;
-          case "list_resume_sessions":
-          case "list_resume_threads":
-            sendResponse(
-              message.id,
-              true,
-              await adapter.listResumeSessions(message.payload.limit),
-            );
-            break;
-          case "resume_session":
-            await adapter.resumeSession(message.payload.sessionId);
-            publishState();
-            sendResponse(message.id, true);
-            break;
-          case "resume_thread":
-            await adapter.resumeSession(message.payload.threadId);
-            publishState();
-            sendResponse(message.id, true);
-            break;
-          case "interrupt":
-            sendResponse(message.id, true, await adapter.interrupt());
-            break;
-          case "reset":
-            await adapter.reset();
-            publishState();
-            sendResponse(message.id, true);
-            break;
-          case "resolve_approval":
-            sendResponse(
-              message.id,
-              true,
-              await adapter.resolveApproval(message.payload.action),
-            );
-            break;
-          case "dispose":
-            sendResponse(message.id, true);
-            await closePanel(0);
-            break;
+  detachListener = attachCodexPanelMessageListener(
+    socket,
+    (message: CodexPanelMessage) => {
+      if (!helloAcknowledged) {
+        if (message.type === "hello_ack") {
+          helloAcknowledged = true;
         }
-      } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        sendResponse(message.id, false, undefined, text);
+        return;
       }
-    })();
-  });
+
+      if (message.type !== "request") {
+        return;
+      }
+
+      void (async () => {
+        try {
+          switch (message.payload.command) {
+            case "send_input":
+              await adapter.sendInput(message.payload.input);
+              sendResponse(message.id, true);
+              break;
+            case "list_resume_sessions":
+            case "list_resume_threads":
+              sendResponse(
+                message.id,
+                true,
+                await adapter.listResumeSessions(message.payload.limit)
+              );
+              break;
+            case "resume_session":
+              await adapter.resumeSession(message.payload.sessionId);
+              publishState();
+              sendResponse(message.id, true);
+              break;
+            case "resume_thread":
+              await adapter.resumeSession(message.payload.threadId);
+              publishState();
+              sendResponse(message.id, true);
+              break;
+            case "interrupt":
+              sendResponse(message.id, true, await adapter.interrupt());
+              break;
+            case "reset":
+              await adapter.reset();
+              publishState();
+              sendResponse(message.id, true);
+              break;
+            case "resolve_approval":
+              sendResponse(
+                message.id,
+                true,
+                await adapter.resolveApproval(message.payload.action)
+              );
+              break;
+            case "dispose":
+              sendResponse(message.id, true);
+              await closePanel(0);
+              break;
+          }
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error);
+          sendResponse(message.id, false, undefined, text);
+        }
+      })();
+    }
+  );
 
   socket.once("close", () => {
     void closePanel(0);

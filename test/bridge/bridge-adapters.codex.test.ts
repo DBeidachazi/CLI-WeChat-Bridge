@@ -12,7 +12,7 @@ describe("codex exit handling", () => {
         renderMode: "panel",
         shuttingDown: false,
         exitCode: 0,
-      }),
+      })
     ).toBe(true);
   });
 
@@ -22,7 +22,7 @@ describe("codex exit handling", () => {
         renderMode: "embedded",
         shuttingDown: false,
         exitCode: 0,
-      }),
+      })
     ).toBe(false);
   });
 
@@ -32,7 +32,7 @@ describe("codex exit handling", () => {
         transportShuttingDown: false,
         shuttingDown: false,
         cleanPanelExitInProgress: true,
-      }),
+      })
     ).toBe(true);
   });
 });

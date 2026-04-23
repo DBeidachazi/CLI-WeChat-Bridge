@@ -1,41 +1,43 @@
-import { spawn as spawnChildProcess, type ChildProcess } from "node:child_process";
+import {
+  type ChildProcess,
+  spawn as spawnChildProcess,
+} from "node:child_process";
 
 import {
   type AdapterOptions,
+  buildCliEnvironment,
+  delay,
+  describeUnknownError,
   type EventSink,
+  isRecord,
   OPENCODE_SERVER_HOST,
   OPENCODE_SERVER_READY_TIMEOUT_MS,
-  OPENCODE_SSE_RECONNECT_DELAY_MS,
   OPENCODE_SESSION_IDLE_SETTLE_MS,
+  OPENCODE_SSE_RECONNECT_DELAY_MS,
   OPENCODE_WECHAT_WORKING_NOTICE_DELAY_MS,
-  buildCliEnvironment,
-  isRecord,
-  describeUnknownError,
-  resolveSpawnTarget,
   reserveLocalPort,
+  resolveSpawnTarget,
   waitForTcpPort,
-  delay,
 } from "./bridge-adapters.shared.ts";
+import { killProcessTreeSync } from "./bridge-process-reaper.ts";
 import type {
   ApprovalRequest,
   BridgeAdapter,
   BridgeAdapterInput,
   BridgeAdapterState,
+  BridgeEvent,
+  BridgeResumeSessionCandidate,
   BridgeSessionSwitchReason,
   BridgeSessionSwitchSource,
-  BridgeResumeSessionCandidate,
   BridgeTurnOrigin,
-  BridgeEvent,
-  BridgeUserInput,
   PendingApproval,
 } from "./bridge-types.ts";
-import { killProcessTreeSync } from "./bridge-process-reaper.ts";
 import {
   buildOneTimeCode,
   normalizeOutput,
   nowIso,
-  truncatePreview,
   OutputBatcher,
+  truncatePreview,
 } from "./bridge-utils.ts";
 
 /* ------------------------------------------------------------------ */
@@ -91,8 +93,12 @@ type SdkPart = {
 
 type OpenCodeSdkClient = {
   session: {
-    list(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession[]>>;
-    create(parameters?: Record<string, unknown>): Promise<SdkResult<SdkSession>>;
+    list(
+      parameters?: Record<string, unknown>
+    ): Promise<SdkResult<SdkSession[]>>;
+    create(
+      parameters?: Record<string, unknown>
+    ): Promise<SdkResult<SdkSession>>;
     get(parameters: {
       sessionID: string;
       directory?: string;
@@ -129,7 +135,7 @@ type OpenCodeSdkClient = {
   event: {
     subscribe(
       parameters?: Record<string, unknown>,
-      options?: Record<string, unknown>,
+      options?: Record<string, unknown>
     ): Promise<{
       stream: AsyncIterable<unknown>;
     }>;
@@ -189,7 +195,7 @@ type PendingWechatPromptMirrorSuppression = {
 };
 
 const OPENCODE_DEBUG_ENABLED = /^(1|true|yes|on)$/i.test(
-  process.env.WECHAT_OPENCODE_DEBUG ?? "",
+  process.env.WECHAT_OPENCODE_DEBUG ?? ""
 );
 const OPENCODE_DUPLICATE_EVENT_TTL_MS = 150;
 const OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS = 30_000;
@@ -224,16 +230,23 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   private localPromptNoticeSent = false;
   private readonly loggedUnknownEventTypes = new Set<string>();
   private readonly emittedTextByPartId = new Map<string, string>();
-  private readonly observedOpenCodeMessages = new Map<string, ObservedOpenCodeMessage>();
+  private readonly observedOpenCodeMessages = new Map<
+    string,
+    ObservedOpenCodeMessage
+  >();
   private readonly observedUserTextByPartId = new Map<string, string>();
   private readonly observedUserMessagePartIds = new Map<string, Set<string>>();
-  private readonly pendingWechatPromptMirrorSuppressions: PendingWechatPromptMirrorSuppression[] = [];
+  private readonly pendingWechatPromptMirrorSuppressions: PendingWechatPromptMirrorSuppression[] =
+    [];
   private readonly recentSdkEventObservations = new Map<
     string,
     { streamName: SdkEventStreamName; observedAtMs: number }
   >();
   private suppressedTuiSessionSelectId: string | null = null;
-  private lastMirroredLocalPrompt: { text: string; createdAtMs: number } | null = null;
+  private lastMirroredLocalPrompt: {
+    text: string;
+    createdAtMs: number;
+  } | null = null;
 
   private pendingPermission: OpenCodePendingPermission | null = null;
 
@@ -247,7 +260,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       profile: options.profile,
     };
     this.outputBatcher = new OutputBatcher((text) =>
-      this.flushOutputBatch(text),
+      this.flushOutputBatch(text)
     );
     this.workingNoticeDelayMs = OPENCODE_WECHAT_WORKING_NOTICE_DELAY_MS;
   }
@@ -277,7 +290,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await waitForTcpPort(
         OPENCODE_SERVER_HOST,
         this.serverPort,
-        OPENCODE_SERVER_READY_TIMEOUT_MS,
+        OPENCODE_SERVER_READY_TIMEOUT_MS
       );
 
       await this.createSdkClient();
@@ -311,10 +324,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       throw new Error("OpenCode adapter is not running.");
     }
     if (this.state.status === "busy") {
-      throw new Error("OpenCode is still working. Wait for the current reply or use /stop.");
+      throw new Error(
+        "OpenCode is still working. Wait for the current reply or use /stop."
+      );
     }
     if (this.pendingPermission) {
-      throw new Error("An OpenCode approval request is pending. Reply with /confirm <code> or /deny.");
+      throw new Error(
+        "An OpenCode approval request is pending. Reply with /confirm <code> or /deny."
+      );
     }
 
     const normalized = normalizeOutput(text).trim();
@@ -351,25 +368,30 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.beginTrackedTurn(normalized, "wechat");
   }
 
-  async listResumeSessions(limit = 10): Promise<BridgeResumeSessionCandidate[]> {
+  async listResumeSessions(
+    limit = 10
+  ): Promise<BridgeResumeSessionCandidate[]> {
     void limit;
     throw new Error(
-      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.',
+      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.'
     );
   }
 
   async resumeSession(sessionId: string): Promise<void> {
     void sessionId;
     throw new Error(
-      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.',
+      'WeChat /resume is disabled in opencode mode. Use /session directly inside "wechat-opencode"; WeChat will follow the active local session.'
     );
   }
 
   async interrupt(): Promise<boolean> {
-    if (!this.client || !this.activeSessionId) {
+    if (!(this.client && this.activeSessionId)) {
       return false;
     }
-    if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+    if (
+      this.state.status !== "busy" &&
+      this.state.status !== "awaiting_approval"
+    ) {
       return false;
     }
 
@@ -411,7 +433,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   async resolveApproval(action: "confirm" | "deny"): Promise<boolean> {
-    if (!this.pendingPermission || !this.client) {
+    if (!(this.pendingPermission && this.client)) {
       return false;
     }
 
@@ -463,7 +485,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
     if (this.sseLoopPromise) {
       try {
-        await Promise.race([this.sseLoopPromise, delay(3_000)]);
+        await Promise.race([this.sseLoopPromise, delay(3000)]);
       } catch {
         // Ignore SSE loop errors during shutdown.
       }
@@ -511,13 +533,19 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       OPENCODE_SERVER_HOST,
     ];
 
-    const target = resolveSpawnTarget(this.options.command, this.options.kind, { env });
-    this.serverProcess = spawnChildProcess(target.file, [...target.args, ...serverArgs], {
-      cwd: this.options.cwd,
+    const target = resolveSpawnTarget(this.options.command, this.options.kind, {
       env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
     });
+    this.serverProcess = spawnChildProcess(
+      target.file,
+      [...target.args, ...serverArgs],
+      {
+        cwd: this.options.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      }
+    );
 
     const server = this.serverProcess;
 
@@ -566,14 +594,20 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     const env = buildCliEnvironment(this.options.kind);
     const attachArgs = await this.buildNativeAttachArgs();
-    const target = resolveSpawnTarget(this.options.command, this.options.kind, { env });
-    const startedAt = nowIso();
-    const child = spawnChildProcess(target.file, [...target.args, ...attachArgs], {
-      cwd: this.options.cwd,
+    const target = resolveSpawnTarget(this.options.command, this.options.kind, {
       env,
-      stdio: "inherit",
-      windowsHide: false,
     });
+    const startedAt = nowIso();
+    const child = spawnChildProcess(
+      target.file,
+      [...target.args, ...attachArgs],
+      {
+        cwd: this.options.cwd,
+        env,
+        stdio: "inherit",
+        windowsHide: false,
+      }
+    );
 
     this.nativeProcess = child;
     this.state.pid = child.pid ?? process.pid;
@@ -631,7 +665,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       }) as unknown as OpenCodeSdkClient;
     } catch (err) {
       throw new Error(
-        `Failed to load @opencode-ai/sdk. Make sure it is installed: ${describeUnknownError(err)}`,
+        `Failed to load @opencode-ai/sdk. Make sure it is installed: ${describeUnknownError(err)}`
       );
     }
   }
@@ -640,7 +674,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     const baseUrl = `http://${OPENCODE_SERVER_HOST}:${this.serverPort}`;
     const response = await fetch(`${baseUrl}/session/status`);
     if (!response.ok) {
-      throw new Error(`OpenCode health check failed (HTTP ${response.status}).`);
+      throw new Error(
+        `OpenCode health check failed (HTTP ${response.status}).`
+      );
     }
   }
 
@@ -654,7 +690,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     try {
       const result = await this.client.session.list();
       if (result.data && result.data.length > 0) {
-        listedSessions = result.data.filter((session) => this.isCurrentDirectorySession(session));
+        listedSessions = result.data.filter((session) =>
+          this.isCurrentDirectorySession(session)
+        );
         const latest = listedSessions[0];
         if (latest) {
           this.switchSharedSession(latest, {
@@ -673,7 +711,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     if (this.options.initialSharedSessionId) {
       const restoredSessionId = this.options.initialSharedSessionId;
-      const restoredSession = await this.getSessionForCurrentDirectory(restoredSessionId, listedSessions);
+      const restoredSession = await this.getSessionForCurrentDirectory(
+        restoredSessionId,
+        listedSessions
+      );
       if (!restoredSession) {
         return;
       }
@@ -688,20 +729,24 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private async hasSession(
     sessionId: string,
-    listedSessions: SdkSession[] = [],
+    listedSessions: SdkSession[] = []
   ): Promise<boolean> {
-    return Boolean(await this.getSessionForCurrentDirectory(sessionId, listedSessions));
+    return Boolean(
+      await this.getSessionForCurrentDirectory(sessionId, listedSessions)
+    );
   }
 
   private async getSessionForCurrentDirectory(
     sessionId: string,
-    listedSessions: SdkSession[] = [],
+    listedSessions: SdkSession[] = []
   ): Promise<SdkSession | null> {
     if (!this.client) {
       return null;
     }
 
-    const listedSession = listedSessions.find((session) => session.id === sessionId);
+    const listedSession = listedSessions.find(
+      (session) => session.id === sessionId
+    );
     if (listedSession && this.isCurrentDirectorySession(listedSession)) {
       return listedSession;
     }
@@ -769,7 +814,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
             break;
           }
           const event = this.normalizeSdkEvent(rawEvent);
-          if (!event || !this.shouldHandleSseEvent(event, streamName)) {
+          if (!(event && this.shouldHandleSseEvent(event, streamName))) {
             continue;
           }
           if (this.shouldSkipDuplicateSdkEvent(event, streamName)) {
@@ -782,7 +827,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
           return;
         }
         this.logDebug(
-          `[opencode-adapter:${streamName}] Stream error: ${describeUnknownError(err)}`,
+          `[opencode-adapter:${streamName}] Stream error: ${describeUnknownError(err)}`
         );
       }
 
@@ -794,7 +839,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
   }
 
-  private subscribeToSseStream(streamName: SdkEventStreamName): Promise<SdkEventSubscription> {
+  private subscribeToSseStream(
+    streamName: SdkEventStreamName
+  ): Promise<SdkEventSubscription> {
     const signal = this.sseAbortController?.signal;
     if (streamName === "global-sync") {
       return this.client!.global.syncEvent.subscribe({ signal });
@@ -807,7 +854,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         directory: this.options.cwd,
         workspace: this.activeWorkspaceId ?? undefined,
       },
-      { signal },
+      { signal }
     );
   }
 
@@ -834,7 +881,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private shouldHandleSseEvent(
     event: NormalizedSdkEvent,
-    streamName: SdkEventStreamName,
+    streamName: SdkEventStreamName
   ): boolean {
     if (streamName === "event") {
       return true;
@@ -982,24 +1029,36 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
   }
 
-  private handleSessionIdle(properties: Record<string, unknown> | undefined): void {
+  private handleSessionIdle(
+    properties: Record<string, unknown> | undefined
+  ): void {
     if (!isRecord(properties)) {
       return;
     }
 
     const sessionId = this.extractSessionId(properties) ?? this.activeSessionId;
-    if (!this.syncTrackedSessionFromEvent(sessionId, { allowLocalTurnFollow: false })) {
+    if (
+      !this.syncTrackedSessionFromEvent(sessionId, {
+        allowLocalTurnFollow: false,
+      })
+    ) {
       return;
     }
 
-    if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+    if (
+      this.state.status !== "busy" &&
+      this.state.status !== "awaiting_approval"
+    ) {
       return;
     }
 
     // Wait a short settle time before emitting task_complete,
     // in case more events follow the idle signal.
     setTimeout(() => {
-      if (this.state.status !== "busy" && this.state.status !== "awaiting_approval") {
+      if (
+        this.state.status !== "busy" &&
+        this.state.status !== "awaiting_approval"
+      ) {
         return;
       }
 
@@ -1010,7 +1069,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.hasAcceptedInput = false;
       const completedPreview = this.currentPreview;
 
-      void this.outputBatcher.flushNow()
+      void this.outputBatcher
+        .flushNow()
         .catch(() => undefined)
         .then(() => {
           const summary = this.outputBatcher.getRecentSummary(500);
@@ -1035,7 +1095,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }, OPENCODE_SESSION_IDLE_SETTLE_MS).unref?.();
   }
 
-  private handleSessionStatus(properties: Record<string, unknown> | undefined): void {
+  private handleSessionStatus(
+    properties: Record<string, unknown> | undefined
+  ): void {
     if (!isRecord(properties)) {
       return;
     }
@@ -1051,28 +1113,30 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const statusType = typeof status.type === "string" ? status.type : undefined;
+    const statusType =
+      typeof status.type === "string" ? status.type : undefined;
     if (!statusType) {
       return;
     }
 
-    if (statusType === "busy" || statusType === "running") {
-      if (this.state.status === "idle") {
-        this.outputBatcher.clear();
-        this.clearStreamedPartState();
-        this.lastBusyAtMs = Date.now();
-        this.setStatus(
-          "busy",
-          this.state.activeTurnOrigin === "local"
-            ? "OpenCode is busy with a local terminal turn."
-            : undefined,
-        );
-      }
+    if (
+      (statusType === "busy" || statusType === "running") &&
+      this.state.status === "idle"
+    ) {
+      this.outputBatcher.clear();
+      this.clearStreamedPartState();
+      this.lastBusyAtMs = Date.now();
+      this.setStatus(
+        "busy",
+        this.state.activeTurnOrigin === "local"
+          ? "OpenCode is busy with a local terminal turn."
+          : undefined
+      );
     }
   }
 
   private handlePermissionRequest(properties: unknown): void {
-    if (!isRecord(properties) || !this.client) {
+    if (!(isRecord(properties) && this.client)) {
       return;
     }
 
@@ -1105,7 +1169,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.state.pendingApprovalOrigin = undefined;
   }
 
-  private toPendingApproval(pendingPermission: OpenCodePendingPermission): PendingApproval {
+  private toPendingApproval(
+    pendingPermission: OpenCodePendingPermission
+  ): PendingApproval {
     return {
       ...pendingPermission.request,
       code: pendingPermission.code,
@@ -1114,18 +1180,16 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private buildPendingPermission(
-    properties: Record<string, unknown>,
+    properties: Record<string, unknown>
   ): OpenCodePendingPermission | null {
     const sessionId =
       typeof properties.sessionID === "string"
         ? properties.sessionID
         : this.activeSessionId;
     const permissionId =
-      typeof properties.id === "string"
-        ? properties.id
-        : undefined;
+      typeof properties.id === "string" ? properties.id : undefined;
 
-    if (!sessionId || !permissionId) {
+    if (!(sessionId && permissionId)) {
       return null;
     }
 
@@ -1148,7 +1212,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         : typeof metadata.detail === "string"
           ? metadata.detail
           : Array.isArray(properties.patterns)
-            ? properties.patterns.filter((value): value is string => typeof value === "string").join(", ")
+            ? properties.patterns
+                .filter((value): value is string => typeof value === "string")
+                .join(", ")
             : undefined;
 
     return {
@@ -1158,11 +1224,18 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       createdAt: nowIso(),
       request: {
         source: "cli",
-        summary: title ?? `OpenCode needs approval${toolName ? ` for tool: ${toolName}` : ""}.`,
-        commandPreview: truncatePreview(command ?? title ?? "Permission request", 180),
+        summary:
+          title ??
+          `OpenCode needs approval${toolName ? ` for tool: ${toolName}` : ""}.`,
+        commandPreview: truncatePreview(
+          command ?? title ?? "Permission request",
+          180
+        ),
         toolName,
-        detailPreview: typeof metadata.detail === "string" ? metadata.detail : undefined,
-        detailLabel: typeof metadata.label === "string" ? metadata.label : undefined,
+        detailPreview:
+          typeof metadata.detail === "string" ? metadata.detail : undefined,
+        detailLabel:
+          typeof metadata.label === "string" ? metadata.label : undefined,
         confirmInput: undefined,
         denyInput: undefined,
       },
@@ -1195,18 +1268,29 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const sessionId = this.extractSessionId(properties);
-    if (sessionId && !this.syncTrackedSessionFromEvent(sessionId, { allowLocalTurnFollow: false })) {
+    if (
+      sessionId &&
+      !this.syncTrackedSessionFromEvent(sessionId, {
+        allowLocalTurnFollow: false,
+      })
+    ) {
       return;
     }
 
     const info = isRecord(properties.info) ? properties.info : undefined;
     const messageId = typeof info?.id === "string" ? info.id : undefined;
-    const role = info?.role === "user" || info?.role === "assistant" ? info.role : undefined;
+    const role =
+      info?.role === "user" || info?.role === "assistant"
+        ? info.role
+        : undefined;
     if (!messageId) {
       return;
     }
 
-    const observed = this.getOrCreateObservedOpenCodeMessage(messageId, sessionId);
+    const observed = this.getOrCreateObservedOpenCodeMessage(
+      messageId,
+      sessionId
+    );
     observed.updatedAtMs = Date.now();
     observed.sessionId = sessionId ?? observed.sessionId;
     observed.role = role;
@@ -1231,7 +1315,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         sessionId: part.sessionID,
         partId: part.id,
         snapshotText: typeof part.text === "string" ? part.text : undefined,
-        deltaText: typeof properties.delta === "string" ? properties.delta : undefined,
+        deltaText:
+          typeof properties.delta === "string" ? properties.delta : undefined,
       });
       if (this.observedOpenCodeMessages.get(part.messageID)?.role === "user") {
         return;
@@ -1255,14 +1340,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const partText =
-      typeof part.text === "string"
-        ? part.text
-        : undefined;
+    const partText = typeof part.text === "string" ? part.text : undefined;
     const delta =
-      typeof properties.delta === "string"
-        ? properties.delta
-        : undefined;
+      typeof properties.delta === "string" ? properties.delta : undefined;
     const text = partText
       ? this.consumeVisiblePartSnapshot(partId, partText)
       : delta
@@ -1278,14 +1358,22 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     if (this.state.status !== "busy") {
       const sessionIdForTrackedMessage =
-        typeof properties.sessionID === "string" ? properties.sessionID : undefined;
+        typeof properties.sessionID === "string"
+          ? properties.sessionID
+          : undefined;
       const messageIdForTrackedMessage =
-        typeof properties.messageID === "string" ? properties.messageID : undefined;
+        typeof properties.messageID === "string"
+          ? properties.messageID
+          : undefined;
       const partIdForTrackedMessage =
         typeof properties.partID === "string" ? properties.partID : undefined;
       const deltaForTrackedMessage =
         typeof properties.delta === "string" ? properties.delta : undefined;
-      if (messageIdForTrackedMessage && partIdForTrackedMessage && deltaForTrackedMessage) {
+      if (
+        messageIdForTrackedMessage &&
+        partIdForTrackedMessage &&
+        deltaForTrackedMessage
+      ) {
         this.trackObservedOpenCodeMessagePart({
           messageId: messageIdForTrackedMessage,
           sessionId: sessionIdForTrackedMessage,
@@ -1301,9 +1389,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const delta =
-      typeof properties.delta === "string"
-        ? properties.delta
-        : undefined;
+      typeof properties.delta === "string" ? properties.delta : undefined;
     const sessionId =
       typeof properties.sessionID === "string"
         ? properties.sessionID
@@ -1317,12 +1403,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         partId,
         deltaText: delta,
       });
-      if (this.observedOpenCodeMessages.get(properties.messageID)?.role === "user") {
+      if (
+        this.observedOpenCodeMessages.get(properties.messageID)?.role === "user"
+      ) {
         return;
       }
     }
 
-    if (!delta || !partId || !this.syncTrackedSessionFromEvent(sessionId)) {
+    if (!(delta && partId && this.syncTrackedSessionFromEvent(sessionId))) {
       return;
     }
 
@@ -1348,7 +1436,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const text = typeof properties.text === "string" ? properties.text : undefined;
+    const text =
+      typeof properties.text === "string" ? properties.text : undefined;
     if (!text) {
       return;
     }
@@ -1362,7 +1451,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const command = typeof properties.command === "string" ? properties.command : undefined;
+    const command =
+      typeof properties.command === "string" ? properties.command : undefined;
     if (!command) {
       return;
     }
@@ -1385,7 +1475,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const sessionId = typeof properties.sessionID === "string" ? properties.sessionID : undefined;
+    const sessionId =
+      typeof properties.sessionID === "string"
+        ? properties.sessionID
+        : undefined;
     if (!sessionId) {
       return;
     }
@@ -1397,7 +1490,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     this.pendingLocalPrompt = "";
     this.localPromptNoticeSent = false;
-    this.logDebug(`[opencode-adapter:local-follow] tui.session.select ${sessionId}`);
+    this.logDebug(
+      `[opencode-adapter:local-follow] tui.session.select ${sessionId}`
+    );
     this.switchSharedSession(
       {
         id: sessionId,
@@ -1409,7 +1504,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         notify: true,
         clearTrackedTurn: true,
         syncVisible: true,
-      },
+      }
     );
   }
 
@@ -1418,14 +1513,17 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const name = typeof properties.name === "string" ? properties.name : undefined;
+    const name =
+      typeof properties.name === "string" ? properties.name : undefined;
     if (!this.isLocalSessionNavigationCommand(name)) {
       return;
     }
 
     const sessionId = this.extractSessionId(properties);
     if (sessionId) {
-      this.logDebug(`[opencode-adapter:local-follow] command.executed ${name} -> ${sessionId}`);
+      this.logDebug(
+        `[opencode-adapter:local-follow] command.executed ${name} -> ${sessionId}`
+      );
       this.switchSharedSession(
         {
           id: sessionId,
@@ -1437,12 +1535,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
           notify: true,
           clearTrackedTurn: true,
           syncVisible: true,
-        },
+        }
       );
     }
   }
 
-  private handleSessionError(properties: Record<string, unknown> | undefined): void {
+  private handleSessionError(
+    properties: Record<string, unknown> | undefined
+  ): void {
     if (!isRecord(properties)) {
       return;
     }
@@ -1455,7 +1555,12 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     }
 
     const sessionId = this.extractSessionId(properties);
-    if (sessionId && !this.syncTrackedSessionFromEvent(sessionId, { allowLocalTurnFollow: false })) {
+    if (
+      sessionId &&
+      !this.syncTrackedSessionFromEvent(sessionId, {
+        allowLocalTurnFollow: false,
+      })
+    ) {
       return;
     }
 
@@ -1500,15 +1605,24 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     snapshotText?: string;
     deltaText?: string;
   }): void {
-    const observed = this.getOrCreateObservedOpenCodeMessage(params.messageId, params.sessionId);
+    const observed = this.getOrCreateObservedOpenCodeMessage(
+      params.messageId,
+      params.sessionId
+    );
     observed.updatedAtMs = Date.now();
     observed.sessionId = params.sessionId ?? observed.sessionId;
 
     let chunk = "";
     if (typeof params.snapshotText === "string") {
-      chunk = this.consumeObservedUserPartSnapshot(params.partId, params.snapshotText);
+      chunk = this.consumeObservedUserPartSnapshot(
+        params.partId,
+        params.snapshotText
+      );
     } else if (typeof params.deltaText === "string") {
-      chunk = this.consumeObservedUserPartDelta(params.partId, params.deltaText);
+      chunk = this.consumeObservedUserPartDelta(
+        params.partId,
+        params.deltaText
+      );
     }
 
     if (!chunk) {
@@ -1527,7 +1641,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private getOrCreateObservedOpenCodeMessage(
     messageId: string,
-    sessionId?: string,
+    sessionId?: string
   ): ObservedOpenCodeMessage {
     const existing = this.observedOpenCodeMessages.get(messageId);
     if (existing) {
@@ -1577,15 +1691,24 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     this.cleanupObservedOpenCodeMessage(messageId);
   }
 
-  private recordPendingWechatPromptMirrorSuppression(sessionId: string, text: string): void {
+  private recordPendingWechatPromptMirrorSuppression(
+    sessionId: string,
+    text: string
+  ): void {
     const normalizedText = normalizeOutput(text).trim();
-    if (!sessionId || !normalizedText) {
+    if (!(sessionId && normalizedText)) {
       return;
     }
 
     const cutoff = Date.now() - OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS;
-    for (let index = this.pendingWechatPromptMirrorSuppressions.length - 1; index >= 0; index -= 1) {
-      if (this.pendingWechatPromptMirrorSuppressions[index]!.createdAtMs < cutoff) {
+    for (
+      let index = this.pendingWechatPromptMirrorSuppressions.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      if (
+        this.pendingWechatPromptMirrorSuppressions[index]!.createdAtMs < cutoff
+      ) {
         this.pendingWechatPromptMirrorSuppressions.splice(index, 1);
       }
     }
@@ -1596,14 +1719,21 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     });
   }
 
-  private shouldSuppressWechatMirroredPrompt(sessionId: string, text: string): boolean {
+  private shouldSuppressWechatMirroredPrompt(
+    sessionId: string,
+    text: string
+  ): boolean {
     const normalizedText = normalizeOutput(text).trim();
-    if (!sessionId || !normalizedText) {
+    if (!(sessionId && normalizedText)) {
       return false;
     }
 
     const cutoff = Date.now() - OPENCODE_WECHAT_MIRROR_SUPPRESSION_TTL_MS;
-    for (let index = this.pendingWechatPromptMirrorSuppressions.length - 1; index >= 0; index -= 1) {
+    for (
+      let index = this.pendingWechatPromptMirrorSuppressions.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
       const pending = this.pendingWechatPromptMirrorSuppressions[index]!;
       if (pending.createdAtMs < cutoff) {
         this.pendingWechatPromptMirrorSuppressions.splice(index, 1);
@@ -1628,7 +1758,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.state.activeTurnOrigin === "local" &&
       this.hasAcceptedInput &&
       this.lastMirroredLocalPrompt &&
-      this.lastMirroredLocalPrompt.createdAtMs >= Date.now() - OPENCODE_RECENT_LOCAL_PROMPT_TTL_MS &&
+      this.lastMirroredLocalPrompt.createdAtMs >=
+        Date.now() - OPENCODE_RECENT_LOCAL_PROMPT_TTL_MS &&
       this.lastMirroredLocalPrompt.text === normalizedText
     ) {
       return true;
@@ -1648,7 +1779,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private async ensureSession(): Promise<SdkSession> {
     if (this.activeSessionId && this.client) {
-      const session = await this.getSessionForCurrentDirectory(this.activeSessionId);
+      const session = await this.getSessionForCurrentDirectory(
+        this.activeSessionId
+      );
       if (session) {
         return session;
       }
@@ -1663,7 +1796,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       await this.client.session.create({
         directory: this.options.cwd,
         workspace: this.activeWorkspaceId ?? undefined,
-      }),
+      })
     );
     return session;
   }
@@ -1674,7 +1807,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     options: {
       busyMessage?: string;
       emitMirroredUserInput?: boolean;
-    } = {},
+    } = {}
   ): void {
     this.hasAcceptedInput = true;
     this.currentPreview = truncatePreview(text);
@@ -1758,15 +1891,19 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     });
   }
 
-  private describeSessionError(error: Record<string, unknown> | undefined): string | null {
+  private describeSessionError(
+    error: Record<string, unknown> | undefined
+  ): string | null {
     if (!error) {
       return "OpenCode reported an unknown session error.";
     }
 
     const name = typeof error.name === "string" ? error.name : "UnknownError";
     const data = isRecord(error.data) ? error.data : undefined;
-    const message = typeof data?.message === "string" ? data.message.trim() : "";
-    const providerId = typeof data?.providerID === "string" ? data.providerID : undefined;
+    const message =
+      typeof data?.message === "string" ? data.message.trim() : "";
+    const providerId =
+      typeof data?.providerID === "string" ? data.providerID : undefined;
 
     if (name === "ProviderAuthError") {
       return providerId
@@ -1841,7 +1978,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private assignActiveSession(
-    session: { id: string; workspaceID?: string } | string | null | undefined,
+    session: { id: string; workspaceID?: string } | string | null | undefined
   ): boolean {
     const sessionId = typeof session === "string" ? session : session?.id;
     if (!sessionId) {
@@ -1863,7 +2000,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     session: { id: string; workspaceID?: string } | string | null | undefined,
     options: {
       allowLocalTurnFollow?: boolean;
-    } = {},
+    } = {}
   ): boolean {
     const sessionId = typeof session === "string" ? session : session?.id;
     if (!sessionId) {
@@ -1875,7 +2012,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return true;
     }
 
-    if (options.allowLocalTurnFollow !== false && this.shouldFollowLocalTurnSession(sessionId)) {
+    if (
+      options.allowLocalTurnFollow !== false &&
+      this.shouldFollowLocalTurnSession(sessionId)
+    ) {
       this.switchSharedSession(session, {
         source: "local",
         reason: "local_turn",
@@ -1889,7 +2029,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private extractSessionReference(
-    properties: Record<string, unknown>,
+    properties: Record<string, unknown>
   ): { id: string; workspaceID?: string } | null {
     if (typeof properties.sessionID === "string") {
       return {
@@ -1902,7 +2042,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     if (typeof info?.id === "string") {
       return {
         id: info.id,
-        workspaceID: this.extractWorkspaceId(info) ?? this.extractWorkspaceId(properties) ?? undefined,
+        workspaceID:
+          this.extractWorkspaceId(info) ??
+          this.extractWorkspaceId(properties) ??
+          undefined,
       };
     }
 
@@ -1913,7 +2056,9 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return this.extractSessionReference(properties)?.id ?? null;
   }
 
-  private extractWorkspaceId(properties: Record<string, unknown>): string | null {
+  private extractWorkspaceId(
+    properties: Record<string, unknown>
+  ): string | null {
     if (typeof properties.workspaceID === "string") {
       return properties.workspaceID;
     }
@@ -1943,7 +2088,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       clearTrackedTurn?: boolean;
       syncVisible?: boolean;
       forceVisibleSync?: boolean;
-    },
+    }
   ): boolean {
     const sessionId = typeof session === "string" ? session : session.id;
     if (!sessionId) {
@@ -1955,15 +2100,27 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       this.clearTrackedTurnForLocalSessionSwitch();
     }
     if (changed) {
-      this.recordSessionSwitch(sessionId, options.source, options.reason, options.notify);
+      this.recordSessionSwitch(
+        sessionId,
+        options.source,
+        options.reason,
+        options.notify
+      );
     }
-    if (options.syncVisible !== false && (changed || options.forceVisibleSync)) {
-      void this.syncVisibleSessionSelection(typeof session === "string" ? { id: session } : session);
+    if (
+      options.syncVisible !== false &&
+      (changed || options.forceVisibleSync)
+    ) {
+      void this.syncVisibleSessionSelection(
+        typeof session === "string" ? { id: session } : session
+      );
     }
     return changed;
   }
 
-  private async syncVisibleSessionToShared(options: { force?: boolean } = {}): Promise<void> {
+  private async syncVisibleSessionToShared(
+    options: { force?: boolean } = {}
+  ): Promise<void> {
     if (!this.activeSessionId) {
       return;
     }
@@ -1973,7 +2130,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         id: this.activeSessionId,
         workspaceID: this.activeWorkspaceId ?? undefined,
       },
-      { force: options.force },
+      { force: options.force }
     );
   }
 
@@ -1981,7 +2138,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     session: { id: string; workspaceID?: string },
     options: {
       force?: boolean;
-    } = {},
+    } = {}
   ): Promise<void> {
     if (
       !this.client?.tui ||
@@ -1993,7 +2150,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     this.suppressedTuiSessionSelectId = session.id;
     this.logDebug(
-      `[opencode-adapter:tui] selectSession session=${session.id} workspace=${session.workspaceID ?? this.activeWorkspaceId ?? "(none)"}`,
+      `[opencode-adapter:tui] selectSession session=${session.id} workspace=${session.workspaceID ?? this.activeWorkspaceId ?? "(none)"}`
     );
 
     try {
@@ -2010,12 +2167,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         this.suppressedTuiSessionSelectId = null;
       }
       this.logDebug(
-        `[opencode-adapter:tui] selectSession failed for ${session.id}: ${describeUnknownError(err)}`,
+        `[opencode-adapter:tui] selectSession failed for ${session.id}: ${describeUnknownError(err)}`
       );
     }
   }
 
-  private isLocalSessionNavigationCommand(command: string | undefined): boolean {
+  private isLocalSessionNavigationCommand(
+    command: string | undefined
+  ): boolean {
     if (!command) {
       return false;
     }
@@ -2046,7 +2205,8 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
         : undefined;
     if (wrappedDirectory) {
       const matchesWrappedDirectory =
-        this.normalizeDirectory(wrappedDirectory) === this.normalizeDirectory(this.options.cwd);
+        this.normalizeDirectory(wrappedDirectory) ===
+        this.normalizeDirectory(this.options.cwd);
       if (!matchesWrappedDirectory) {
         return false;
       }
@@ -2059,16 +2219,21 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     const directory = this.extractSessionDirectory(payload);
     if (directory) {
       const matchesDirectory =
-        this.normalizeDirectory(directory) === this.normalizeDirectory(this.options.cwd);
+        this.normalizeDirectory(directory) ===
+        this.normalizeDirectory(this.options.cwd);
       if (!matchesDirectory) {
         return false;
       }
     }
 
     const workspaceId = this.extractWorkspaceId(payload);
-    if (workspaceId && this.activeWorkspaceId && workspaceId !== this.activeWorkspaceId) {
+    if (
+      workspaceId &&
+      this.activeWorkspaceId &&
+      workspaceId !== this.activeWorkspaceId
+    ) {
       this.logDebug(
-        `[opencode-adapter:sse] Ignored workspace mismatch session=${this.extractSessionId(payload) ?? "(unknown)"} eventWorkspace=${workspaceId} activeWorkspace=${this.activeWorkspaceId}`,
+        `[opencode-adapter:sse] Ignored workspace mismatch session=${this.extractSessionId(payload) ?? "(unknown)"} eventWorkspace=${workspaceId} activeWorkspace=${this.activeWorkspaceId}`
       );
       return false;
     }
@@ -2080,11 +2245,14 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     const sessionId = this.extractSessionId(payload);
     return Boolean(
       sessionId &&
-        (sessionId === this.activeSessionId || sessionId === this.state.sharedSessionId),
+        (sessionId === this.activeSessionId ||
+          sessionId === this.state.sharedSessionId)
     );
   }
 
-  private extractSessionDirectory(properties: Record<string, unknown>): string | null {
+  private extractSessionDirectory(
+    properties: Record<string, unknown>
+  ): string | null {
     if (typeof properties.directory === "string") {
       return properties.directory;
     }
@@ -2098,11 +2266,18 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private isCurrentDirectorySession(session: SdkSession): boolean {
-    if (this.normalizeDirectory(session.directory) !== this.normalizeDirectory(this.options.cwd)) {
+    if (
+      this.normalizeDirectory(session.directory) !==
+      this.normalizeDirectory(this.options.cwd)
+    ) {
       return false;
     }
 
-    if (session.workspaceID && this.activeWorkspaceId && session.workspaceID !== this.activeWorkspaceId) {
+    if (
+      session.workspaceID &&
+      this.activeWorkspaceId &&
+      session.workspaceID !== this.activeWorkspaceId
+    ) {
       return false;
     }
 
@@ -2110,14 +2285,17 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
   }
 
   private normalizeDirectory(directory: string): string {
-    return directory.replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase();
+    return directory
+      .replace(/[\\/]+/g, "\\")
+      .replace(/\\$/, "")
+      .toLowerCase();
   }
 
   private recordSessionSwitch(
     sessionId: string,
     source: BridgeSessionSwitchSource,
     reason: BridgeSessionSwitchReason,
-    notify = false,
+    notify = false
   ): void {
     const timestamp = nowIso();
     this.state.lastSessionSwitchAt = timestamp;
@@ -2140,13 +2318,15 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return `http://${OPENCODE_SERVER_HOST}:${this.serverPort}`;
   }
 
-  private isVisibleTextPart(part: Record<string, unknown> | undefined): part is SdkPart {
+  private isVisibleTextPart(
+    part: Record<string, unknown> | undefined
+  ): part is SdkPart {
     return !!part && part.type === "text" && part.ignored !== true;
   }
 
   private extractPartId(
     properties: Record<string, unknown>,
-    part?: Record<string, unknown> | undefined,
+    part?: Record<string, unknown> | undefined
   ): string | null {
     if (typeof properties.partID === "string") {
       return properties.partID;
@@ -2179,7 +2359,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return nextText.slice(previousText.length);
     }
 
-    const sharedPrefixLength = this.getSharedPrefixLength(previousText, nextText);
+    const sharedPrefixLength = this.getSharedPrefixLength(
+      previousText,
+      nextText
+    );
     return nextText.slice(sharedPrefixLength);
   }
 
@@ -2203,7 +2386,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
     return nextChunk;
   }
 
-  private consumeObservedUserPartSnapshot(partId: string, text: string): string {
+  private consumeObservedUserPartSnapshot(
+    partId: string,
+    text: string
+  ): string {
     const nextText = normalizeOutput(text);
     if (!nextText) {
       return "";
@@ -2223,7 +2409,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return nextText.slice(previousText.length);
     }
 
-    const sharedPrefixLength = this.getSharedPrefixLength(previousText, nextText);
+    const sharedPrefixLength = this.getSharedPrefixLength(
+      previousText,
+      nextText
+    );
     return nextText.slice(sharedPrefixLength);
   }
 
@@ -2297,7 +2486,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private shouldSkipDuplicateSdkEvent(
     event: NormalizedSdkEvent,
-    streamName: SdkEventStreamName,
+    streamName: SdkEventStreamName
   ): boolean {
     const key = this.getDuplicateSdkEventKey(event);
     if (!key) {
@@ -2306,7 +2495,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     const now = Date.now();
     const cutoff = now - OPENCODE_DUPLICATE_EVENT_TTL_MS;
-    for (const [candidateKey, observed] of this.recentSdkEventObservations.entries()) {
+    for (const [
+      candidateKey,
+      observed,
+    ] of this.recentSdkEventObservations.entries()) {
       if (observed.observedAtMs < cutoff) {
         this.recentSdkEventObservations.delete(candidateKey);
       }
@@ -2314,7 +2506,11 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     const previous = this.recentSdkEventObservations.get(key);
     this.recentSdkEventObservations.set(key, { streamName, observedAtMs: now });
-    return Boolean(previous && previous.streamName !== streamName && previous.observedAtMs >= cutoff);
+    return Boolean(
+      previous &&
+        previous.streamName !== streamName &&
+        previous.observedAtMs >= cutoff
+    );
   }
 
   private getDuplicateSdkEventKey(event: NormalizedSdkEvent): string | null {
@@ -2326,21 +2522,26 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
     switch (type) {
       case "tui.prompt.append": {
-        const text = typeof payload.text === "string" ? payload.text : undefined;
+        const text =
+          typeof payload.text === "string" ? payload.text : undefined;
         return text ? `${type}:${text}` : null;
       }
       case "tui.command.execute": {
-        const command = typeof payload.command === "string" ? payload.command : undefined;
+        const command =
+          typeof payload.command === "string" ? payload.command : undefined;
         return command ? `${type}:${command}` : null;
       }
       case "tui.session.select": {
-        const sessionId = typeof payload.sessionID === "string" ? payload.sessionID : undefined;
+        const sessionId =
+          typeof payload.sessionID === "string" ? payload.sessionID : undefined;
         return sessionId ? `${type}:${sessionId}` : null;
       }
       case "command.executed": {
-        const name = typeof payload.name === "string" ? payload.name : undefined;
+        const name =
+          typeof payload.name === "string" ? payload.name : undefined;
         const sessionId = this.extractSessionId(payload) ?? "";
-        const args = typeof payload.arguments === "string" ? payload.arguments : "";
+        const args =
+          typeof payload.arguments === "string" ? payload.arguments : "";
         return name ? `${type}:${name}:${sessionId}:${args}` : null;
       }
       case "session.created":
@@ -2359,7 +2560,10 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
       return;
     }
 
-    const preview = truncatePreview(normalizeOutput(this.pendingLocalPrompt).trim(), 180);
+    const preview = truncatePreview(
+      normalizeOutput(this.pendingLocalPrompt).trim(),
+      180
+    );
     if (!preview) {
       return;
     }
@@ -2375,7 +2579,7 @@ export class OpenCodeServerAdapter implements BridgeAdapter {
 
   private setStatus(
     status: BridgeAdapterState["status"],
-    message?: string,
+    message?: string
   ): void {
     this.state.status = status;
     this.emit({
