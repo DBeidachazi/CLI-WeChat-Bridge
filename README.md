@@ -277,24 +277,24 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
 
-为了避免 Gemini / Claude / Copilot 在项目目录里重复读到多份同名指令文件，`.linkai` 里的共享文档源文件使用：
+为了避免 Gemini / Claude / Copilot 在项目目录里重复读到多份同名指令文件，`.linkai` 里的共享文档源文件只保留一份：
 
 - `.linkai/AGENT.shared.md`
-- `.linkai/CLAUDE.shared.md`
-- `.linkai/GEMINI.shared.md`
 
-同步到各 provider 家目录时，才会映射成它们真正识别的目标文件名，例如 `/root/.gemini/GEMINI.md`。Docker 镜像不会再把 `AGENT.md`、`AGENTS.md`、`GEMINI.md`、`TODO.md`、`PROGRESS.md` 复制到 `/app`，默认桥接工作目录也固定为 `/root`，所以模型通常只会读到：
+启动时会根据 `.linkai/config/markdown.xml` 检查文档版本。`AGENT.shared.md` 没有版本标记时按 `1.0.0` 处理；如果配置版本更高，会按版本顺序追加 `.linkai/config/AGENT.share-<version>.md` 或 `.linkai/config/AGENT.shared-<version>.md` 里的补丁内容，再更新 `<!-- linkai:version=... -->` 标记。这个状态跟文档本身走，不需要 SQLite。
+
+同步到各 provider 家目录时，才会映射成它们真正识别的目标文件名，例如 `/root/.gemini/GEMINI.md`。Docker 镜像不会再把 `AGENT.md`、`AGENTS.md`、`GEMINI.md`、`TODO.md`、`PROGRESS.md` 复制到 `/app`，默认桥接工作目录也固定为 `/root`，所以模型通常只会读到一份全局上下文，例如：
 
 - 全局级 `/root/.gemini/GEMINI.md`
 
 而不会再把 `/app/GEMINI.md` 或 `/app/.linkai/GEMINI.md` 这种项目侧重复上下文一起吃进去。
 
-共享根目录里的 `*.shared.md` 和 `skills/*` 也会通过符号链接暴露到：
+共享根目录里的 `AGENT.shared.md` 会按目标 CLI 映射为单个文档：
 
-- `.claude/`
-- `.codex/`
-- `.gemini/`
-- `.copilot/`
+- `/root/.claude/CLAUDE.md`
+- `/root/.codex/AGENT.md`
+- `/root/.gemini/GEMINI.md`
+- `/root/.copilot/AGENT.md`
 
 Docker 容器启动后，同一套链接会同步到：
 

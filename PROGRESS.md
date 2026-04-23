@@ -49,9 +49,10 @@
   - `/ai ...` now forwards slash commands into the active inner AI session, normalizing `/ai status` into `/status`
 - Allowed startup-time adapter switching from WeChat before a disconnected default Codex companion blocks ordinary prompt forwarding.
 - Reverted the two CRLF-polluted history entries (`781e9acbd00e9471af676a2c1e902bbb8880150e` and `5a57671c8449c16f00245fa4e0ef72fc9186815c`) with dedicated revert commits, then removed `.gitattributes` so line-ending policy is no longer enforced from the repo root.
-- Updated the tracked hidden-directory overlay and container bootstrap so shared `.linkai` guidance files are linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
+- Updated the tracked hidden-directory overlay and container bootstrap so the shared `.linkai` guidance source is linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
 - Added `scripts/multi-link-service.cjs` plus startup-time symlink probing so Docker deployments on filesystems like `exfat` now keep `.linkai` docs and `skills` continuously synchronized into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` instead of failing on unsupported symlinks or settling for one-shot copies.
-- Reduced provider-context duplication by renaming shared `.linkai` guidance sources to non-reserved `*.shared.md` filenames, keeping only the target home-directory projections (`/root/.gemini/GEMINI.md`, etc.) as provider-visible memory files.
+- Reduced provider-context duplication by keeping only `.linkai/AGENT.shared.md` as the canonical source, mapping it to a single provider-specific target file per CLI, and removing stale extra shared doc targets.
+- Added LinkAI document version detection so `.linkai/config/markdown.xml` can advance `AGENT.shared.md` from the implicit initial `1.0.0` by appending missing version patch files from `.linkai/config`.
 - Updated the Docker runtime so `/app` stays application source only, provider-readable guidance files are no longer copied there, managed plus `wechat-*-start` bridges default their AI workspace to `/root`, and shared docs still project from `/app/.linkai` via `WECHAT_BRIDGE_SHARED_ROOT`.
 
 ## In Progress

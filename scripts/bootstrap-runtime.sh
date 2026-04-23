@@ -16,12 +16,13 @@ sync_shared_ai_overlay() {
   local source_path=""
   local dest_path=""
   local skills_dir=""
-  local doc_source=""
   local doc_target=""
 
   if [[ ! -d "${shared_root}" ]]; then
     return
   fi
+
+  node ./scripts/linkai-doc-version.cjs --shared-root "${shared_root}" || true
 
   copy_entry_if_needed() {
     local source_path="${1}"
@@ -58,23 +59,63 @@ sync_shared_ai_overlay() {
     copy_entry_if_needed "${source_path}" "${dest_path}"
   }
 
+  sync_doc_entry() {
+    local source_path="${1}"
+    local dest_path="${2}"
+
+    if [[ -L "${dest_path}" ]]; then
+      if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
+        return 0
+      fi
+      rm -f "${dest_path}" 2>/dev/null || true
+    elif [[ -f "${dest_path}" ]]; then
+      if cmp -s "${source_path}" "${dest_path}"; then
+        return 0
+      fi
+      cp "${source_path}" "${dest_path}"
+      return 0
+    elif [[ -e "${dest_path}" ]]; then
+      rm -rf "${dest_path}" 2>/dev/null || true
+    fi
+
+    if ln -s "${source_path}" "${dest_path}" 2>/dev/null; then
+      return 0
+    fi
+
+    cp "${source_path}" "${dest_path}"
+  }
+
+  target_doc_name_for_root() {
+    case "$(basename "${1}")" in
+      .claude) printf 'CLAUDE.md' ;;
+      .gemini) printf 'GEMINI.md' ;;
+      *) printf 'AGENT.md' ;;
+    esac
+  }
+
+  remove_stale_shared_docs() {
+    local target_root="${1}"
+    local expected_doc="${2}"
+    local managed_doc=""
+
+    for managed_doc in AGENT.md CLAUDE.md GEMINI.md; do
+      if [[ "${managed_doc}" == "${expected_doc}" ]]; then
+        continue
+      fi
+      rm -rf "${target_root}/${managed_doc}" 2>/dev/null || true
+    done
+  }
+
   for target_root in "${HOME}/.claude" "${HOME}/.codex" "${HOME}/.gemini" "${HOME}/.copilot"; do
     mkdir -p "${target_root}"
 
-    for doc_source in AGENT.shared.md CLAUDE.shared.md GEMINI.shared.md; do
-      source_path="${shared_root}/${doc_source}"
-      [[ -f "${source_path}" ]] || continue
-
-      case "${doc_source}" in
-        AGENT.shared.md) doc_target="AGENT.md" ;;
-        CLAUDE.shared.md) doc_target="CLAUDE.md" ;;
-        GEMINI.shared.md) doc_target="GEMINI.md" ;;
-        *) continue ;;
-      esac
-
+    source_path="${shared_root}/AGENT.shared.md"
+    if [[ -f "${source_path}" ]]; then
+      doc_target="$(target_doc_name_for_root "${target_root}")"
+      remove_stale_shared_docs "${target_root}" "${doc_target}"
       dest_path="${target_root}/${doc_target}"
-      link_or_copy_entry "${source_path}" "${dest_path}"
-    done
+      sync_doc_entry "${source_path}" "${dest_path}"
+    fi
 
     skills_dir="${target_root}/skills"
     if [[ -e "${skills_dir}" && ! -d "${skills_dir}" ]]; then

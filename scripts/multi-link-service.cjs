@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+"use strict";
 
 const chokidar = require("chokidar");
 const fs = require("fs-extra");
@@ -18,7 +19,9 @@ function hasFlag(name) {
   return args.includes(name);
 }
 
-const sharedRoot = path.resolve(readOption("--shared-root", path.join(process.cwd(), ".linkai")));
+const sharedRoot = path.resolve(
+  readOption("--shared-root", path.join(process.cwd(), ".linkai"))
+);
 const targetRoots = readOption("--target-roots", "")
   .split(path.delimiter)
   .map((entry) => entry.trim())
@@ -26,11 +29,18 @@ const targetRoots = readOption("--target-roots", "")
   .map((entry) => path.resolve(entry));
 const once = hasFlag("--once");
 
-const DOC_MAPPINGS = [
-  { sourceName: "AGENT.shared.md", targetName: "AGENT.md" },
-  { sourceName: "CLAUDE.shared.md", targetName: "CLAUDE.md" },
-  { sourceName: "GEMINI.shared.md", targetName: "GEMINI.md" },
-];
+function targetDocNameForRoot(root) {
+  const name = path.basename(root);
+  if (name === ".claude") {
+    return "CLAUDE.md";
+  }
+  if (name === ".gemini") {
+    return "GEMINI.md";
+  }
+  return "AGENT.md";
+}
+
+const MANAGED_DOC_NAMES = ["AGENT.md", "CLAUDE.md", "GEMINI.md"];
 const SKILLS_DIRNAME = "skills";
 const cooldownMs = 500;
 let isSyncing = false;
@@ -51,17 +61,19 @@ function scheduleUnlock() {
 }
 
 function buildDocGroups() {
-  return DOC_MAPPINGS.map(({ sourceName, targetName }) =>
-    [path.join(sharedRoot, sourceName), ...targetRoots.map((root) => path.join(root, targetName))].map((entry) =>
-      path.resolve(entry),
-    ),
-  );
+  return [
+    [
+      path.join(sharedRoot, "AGENT.shared.md"),
+      ...targetRoots.map((root) => path.join(root, targetDocNameForRoot(root))),
+    ].map((entry) => path.resolve(entry)),
+  ];
 }
 
 function buildSkillsRoots() {
-  return [path.join(sharedRoot, SKILLS_DIRNAME), ...targetRoots.map((root) => path.join(root, SKILLS_DIRNAME))].map(
-    (entry) => path.resolve(entry),
-  );
+  return [
+    path.join(sharedRoot, SKILLS_DIRNAME),
+    ...targetRoots.map((root) => path.join(root, SKILLS_DIRNAME)),
+  ].map((entry) => path.resolve(entry));
 }
 
 function ensureBaseLayout() {
@@ -70,6 +82,14 @@ function ensureBaseLayout() {
   for (const targetRoot of targetRoots) {
     fs.ensureDirSync(targetRoot);
     fs.ensureDirSync(path.join(targetRoot, SKILLS_DIRNAME));
+    for (const docName of MANAGED_DOC_NAMES) {
+      if (docName !== targetDocNameForRoot(targetRoot)) {
+        fs.rmSync(path.join(targetRoot, docName), {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
   }
 }
 
@@ -129,7 +149,9 @@ function copyIntoGroup(sourcePath, group) {
 }
 
 function seedMissingFilesInGroup(group) {
-  const existing = group.find((entry) => fs.existsSync(entry) && fs.statSync(entry).isFile());
+  const existing = group.find(
+    (entry) => fs.existsSync(entry) && fs.statSync(entry).isFile()
+  );
   if (!existing) {
     return;
   }
@@ -144,7 +166,9 @@ function walkFiles(rootPath, relativePrefix = "") {
   const entries = fs.readdirSync(rootPath, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const relativePath = relativePrefix ? path.join(relativePrefix, entry.name) : entry.name;
+    const relativePath = relativePrefix
+      ? path.join(relativePrefix, entry.name)
+      : entry.name;
     const absolutePath = path.join(rootPath, relativePath);
     if (entry.isDirectory()) {
       files.push(...walkFiles(absolutePath, relativePath));
@@ -210,7 +234,7 @@ function handleSourceChange(sourcePath) {
   if (!group) {
     return;
   }
-  if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+  if (!(fs.existsSync(sourcePath) && fs.statSync(sourcePath).isFile())) {
     return;
   }
 
@@ -238,7 +262,9 @@ function main() {
 
   const watchTargets = buildWatchTargets();
 
-  log(`starting chokidar sync service sharedRoot=${sharedRoot} targets=${targetRoots.join(",")}`);
+  log(
+    `starting chokidar sync service sharedRoot=${sharedRoot} targets=${targetRoots.join(",")}`
+  );
 
   const watcher = chokidar.watch(watchTargets, {
     persistent: true,
