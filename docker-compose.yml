@@ -10,8 +10,6 @@ services:
     restart: unless-stopped
     working_dir: /app
     volumes:
-      - ./:/app
-      - cli-wechat-bridge-node-modules:/app/node_modules
       - ./home:/root
     networks:
       - openclaw-net
@@ -19,6 +17,3 @@ services:
 networks:
   openclaw-net:
     external: true
-
-volumes:
-  cli-wechat-bridge-node-modules:

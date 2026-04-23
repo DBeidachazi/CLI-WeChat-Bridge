@@ -8,6 +8,10 @@ PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${PROJECT_DIR}"
 
+export WECHAT_BRIDGE_WORKDIR="${WECHAT_BRIDGE_WORKDIR:-${HOME}}"
+export WECHAT_BRIDGE_SHARED_ROOT="${WECHAT_BRIDGE_SHARED_ROOT:-${PROJECT_DIR}/.linkai}"
+mkdir -p "${WECHAT_BRIDGE_WORKDIR}"
+
 CREDENTIALS_FILE="${HOME}/.claude/channels/wechat/account.json"
 BRIDGE_LOCK_FILE="${HOME}/.claude/channels/wechat/bridge.lock.json"
 MULTI_LINK_SERVICE_PID=""
@@ -164,8 +168,8 @@ start_multi_link_service_if_needed
 
 start_managed_bridge() {
   local adapter="${1:-codex}"
-  echo "[startup] starting managed ${adapter} bridge"
-  node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter "${adapter}" &
+  echo "[startup] starting managed ${adapter} bridge (cwd=${WECHAT_BRIDGE_WORKDIR})"
+  node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter "${adapter}" --cwd "${WECHAT_BRIDGE_WORKDIR}" &
   managed_bridge_pid=$!
   last_managed_bridge_pid="${managed_bridge_pid}"
 

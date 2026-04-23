@@ -48,6 +48,7 @@ const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_ADAPTER: LocalCompanionLaunchAdapter = "codex";
 const SHARED_SKILLS_ROOT = ".linkai";
 const SHARED_SKILLS_DIRNAME = "skills";
+const SHARED_ROOT_ENV_NAME = "WECHAT_BRIDGE_SHARED_ROOT";
 const LEGACY_SHARED_SKILLS_ROOT = ".aiskill";
 const SKILL_LINK_TARGETS = [
   ".claude/skills",
@@ -96,7 +97,9 @@ export function isSameWorkspaceCwd(left: string, right: string): boolean {
 
 export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
   let adapter: LocalCompanionLaunchAdapter = DEFAULT_ADAPTER;
-  let cwd = process.cwd();
+  let cwd = process.env.WECHAT_BRIDGE_WORKDIR
+    ? path.resolve(process.env.WECHAT_BRIDGE_WORKDIR)
+    : process.cwd();
   let profile: string | undefined;
   let timeoutMs = DEFAULT_WAIT_TIMEOUT_MS;
 
@@ -114,7 +117,8 @@ export function parseCliArgs(argv: string[]): LocalCompanionStartCliOptions {
           "       wechat-copilot-start [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "       local-companion-start [--adapter <codex|claude|opencode|gemini|copilot>] [--cwd <path>] [--profile <name-or-path>] [--timeout-ms <ms>]",
           "",
-          "Starts or reuses a Codex, Claude, OpenCode, Gemini, or Copilot bridge for the current directory, waits for the local endpoint, then opens the visible companion or panel.",
+          "Starts or reuses a Codex, Claude, OpenCode, Gemini, or Copilot bridge for the configured working directory, waits for the local endpoint, then opens the visible companion or panel.",
+          "Default cwd is WECHAT_BRIDGE_WORKDIR when set; otherwise it is the current shell directory.",
           "tmux-backed launches keep the bridge persistent until another start command replaces it; direct foreground launches stay companion-bound.",
           "",
         ].join("\n")
@@ -378,6 +382,38 @@ function ensureSharedWechatSkill(sharedSkillsDir: string): void {
   }
 }
 
+function resolveSharedSkillsDir(cwd: string): string {
+  const sharedRoot = process.env[SHARED_ROOT_ENV_NAME]
+    ? path.resolve(process.env[SHARED_ROOT_ENV_NAME])
+    : path.join(cwd, SHARED_SKILLS_ROOT);
+  return path.join(sharedRoot, SHARED_SKILLS_DIRNAME);
+}
+
+function linkOrCopyDirectory(
+  sourceDir: string,
+  targetDir: string,
+  adapter: LocalCompanionLaunchAdapter,
+  label: string
+): void {
+  try {
+    fs.symlinkSync(
+      path.relative(path.dirname(targetDir), sourceDir),
+      targetDir,
+      "dir"
+    );
+    return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(adapter, `Falling back to copying ${label}: ${message}`);
+  }
+
+  fs.cpSync(sourceDir, targetDir, {
+    recursive: true,
+    force: false,
+    errorOnExist: false,
+  });
+}
+
 function ensureSharedSkillAlias(
   cwd: string,
   adapter: LocalCompanionLaunchAdapter,
@@ -422,10 +458,11 @@ function ensureSharedSkillAlias(
   } catch {
     // Best effort cleanup.
   }
-  fs.symlinkSync(
-    path.relative(path.dirname(aliasPath), sharedSkillsDir),
+  linkOrCopyDirectory(
+    sharedSkillsDir,
     aliasPath,
-    "dir"
+    adapter,
+    "legacy skills alias"
   );
 }
 
@@ -433,11 +470,7 @@ function ensureSkillSyncLinks(
   cwd: string,
   adapter: LocalCompanionLaunchAdapter
 ): void {
-  const sharedSkillsDir = path.join(
-    cwd,
-    SHARED_SKILLS_ROOT,
-    SHARED_SKILLS_DIRNAME
-  );
+  const sharedSkillsDir = resolveSharedSkillsDir(cwd);
   fs.mkdirSync(sharedSkillsDir, { recursive: true });
   ensureSharedWechatSkill(sharedSkillsDir);
   ensureSharedSkillAlias(cwd, adapter, sharedSkillsDir);
@@ -478,11 +511,7 @@ function ensureSkillSyncLinks(
     } catch {
       // Best effort cleanup.
     }
-    fs.symlinkSync(
-      path.relative(path.dirname(linkPath), sharedSkillsDir),
-      linkPath,
-      "dir"
-    );
+    linkOrCopyDirectory(sharedSkillsDir, linkPath, adapter, relativeTarget);
   }
 }
 

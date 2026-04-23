@@ -21,7 +21,7 @@
 - Switched update checks from rolling 24h cache to a local 5:00 daily window.
 - Added Docker packaging with `imbios/bun-node`, `docker-compose.yml`, `tmux`, `unless-stopped`, `openclaw-net`, `user: "0:0"`, and `./home:/root`.
 - Added runtime bootstrap scripts to auto-install/update Codex, Gemini, Copilot, Claude, and OpenCode inside the container and reinstall the local package globally.
-- Fixed container runtime dependency handling for native modules by adding build tooling, a dedicated `/app/node_modules` volume, and startup-time dependency hashing/rebuild logic for `node-pty`.
+- Fixed container runtime dependency handling for native modules by adding build tooling and startup-time dependency hashing/rebuild logic for `node-pty`.
 - Added container auto-setup for WeChat credentials: when `account.json` is missing, startup now runs `bun run setup` and emits the QR code to container logs instead of failing immediately.
 - Added transcript logging to bridge stdout/stderr so the WeChat <-> CLI text flow is visible in `docker logs`.
 - Updated the container entrypoint from a single bridge `exec` into a lightweight manager loop so `wechat-gemini-start` / `wechat-copilot-start` / similar replacement launches no longer kill the whole container.
@@ -49,10 +49,10 @@
   - `/ai ...` now forwards slash commands into the active inner AI session, normalizing `/ai status` into `/status`
 - Allowed startup-time adapter switching from WeChat before a disconnected default Codex companion blocks ordinary prompt forwarding.
 - Reverted the two CRLF-polluted history entries (`781e9acbd00e9471af676a2c1e902bbb8880150e` and `5a57671c8449c16f00245fa4e0ef72fc9186815c`) with dedicated revert commits, then removed `.gitattributes` so line-ending policy is no longer enforced from the repo root.
-- Updated the Docker image build to copy repository guidance files and tracked hidden overlay directories into `/app` so container-only workflows can inspect the same docs as the source checkout.
 - Updated the tracked hidden-directory overlay and container bootstrap so shared `.linkai` guidance files are linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
 - Added `scripts/multi-link-service.cjs` plus startup-time symlink probing so Docker deployments on filesystems like `exfat` now keep `.linkai` docs and `skills` continuously synchronized into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` instead of failing on unsupported symlinks or settling for one-shot copies.
-- Reduced provider-context duplication by renaming shared `.linkai` guidance sources to non-reserved `*.shared.md` filenames, keeping only the target home-directory projections (`/root/.gemini/GEMINI.md`, etc.) as provider-visible memory files while leaving `/app/GEMINI.md` as the single project-level copy.
+- Reduced provider-context duplication by renaming shared `.linkai` guidance sources to non-reserved `*.shared.md` filenames, keeping only the target home-directory projections (`/root/.gemini/GEMINI.md`, etc.) as provider-visible memory files.
+- Updated the Docker runtime so `/app` stays application source only, provider-readable guidance files are no longer copied there, managed plus `wechat-*-start` bridges default their AI workspace to `/root`, and shared docs still project from `/app/.linkai` via `WECHAT_BRIDGE_SHARED_ROOT`.
 
 ## In Progress
 

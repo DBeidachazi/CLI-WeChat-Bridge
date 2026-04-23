@@ -210,7 +210,7 @@ Compose 配置当前包含这些默认行为：
 - 网络：`openclaw-net`，外部网络
 - 用户：`0:0`
 - 挂载：`./home:/root`
-- `node_modules` 使用独立 volume，避免宿主机源码挂载把容器内原生模块覆盖掉
+- `/app` 使用镜像内置源码，不再挂载宿主机仓库，避免 AI 把项目源码目录当作日常上下文扫描
 
 ## GitHub Actions 与 DockerHub
 
@@ -283,14 +283,13 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 - `.linkai/CLAUDE.shared.md`
 - `.linkai/GEMINI.shared.md`
 
-同步到各 provider 家目录时，才会映射成它们真正识别的目标文件名，例如 `/root/.gemini/GEMINI.md`。这样模型通常只会读到：
+同步到各 provider 家目录时，才会映射成它们真正识别的目标文件名，例如 `/root/.gemini/GEMINI.md`。Docker 镜像不会再把 `AGENT.md`、`AGENTS.md`、`GEMINI.md`、`TODO.md`、`PROGRESS.md` 复制到 `/app`，默认桥接工作目录也固定为 `/root`，所以模型通常只会读到：
 
-- 项目级 `/app/GEMINI.md`
 - 全局级 `/root/.gemini/GEMINI.md`
 
-而不会再把 `/app/.linkai/GEMINI.md` 这种第三份重复上下文一起吃进去。
+而不会再把 `/app/GEMINI.md` 或 `/app/.linkai/GEMINI.md` 这种项目侧重复上下文一起吃进去。
 
-共享根目录里的 `AGENT.md`、`GEMINI.md` 和 `skills/*` 也会通过符号链接暴露到：
+共享根目录里的 `*.shared.md` 和 `skills/*` 也会通过符号链接暴露到：
 
 - `.claude/`
 - `.codex/`
@@ -308,6 +307,8 @@ Docker 容器启动后，同一套链接会同步到：
 
 如果容器的 `/root` 挂载在不支持符号链接的文件系统上，例如 `exfat`，启动时会自动拉起 `scripts/multi-link-service.cjs`。这个基于 `chokidar` 的常驻同步服务会持续把 `.linkai` 与 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot` 之间的共享文档和 `skills` 做多向同步，用文件同步来模拟 link 效果，而不是一次性复制后就失联。
 
+`/app` 在容器里只是 CLI-WeChat-Bridge 程序源码目录，不是给 AI 日常工作的上下文目录。除非你正在调试 bridge 程序本身，否则不要让内层 CLI 扫描 `/app` 下的源码；日常对话、记忆、skills、登录态和临时工作文件都应放在家目录 `/root`。
+
 ## 配置
 
 项目会自动读取仓库根目录下的 `.env`。
@@ -317,6 +318,8 @@ Docker 容器启动后，同一套链接会同步到：
 ```dotenv
 WECHAT_BRIDGE_DEFAULT_CLI_PROGRAM=codex
 WECHAT_BRIDGE_DEFAULT_MODEL=gpt-5.4-mini
+WECHAT_BRIDGE_WORKDIR=/root
+WECHAT_BRIDGE_SHARED_ROOT=/app/.linkai
 WECHAT_BRIDGE_UPDATE_CHECK_HOUR=5
 
 WECHAT_BRIDGE_CODEX_APPROVAL_POLICY=never

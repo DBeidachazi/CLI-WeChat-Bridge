@@ -4,6 +4,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV WECHAT_BRIDGE_WORKDIR=/root
+ENV WECHAT_BRIDGE_SHARED_ROOT=/app/.linkai
 
 COPY package.json package-lock.json bun.lock tsconfig.json ./
 RUN npm install
@@ -12,11 +14,7 @@ COPY bin ./bin
 COPY src ./src
 COPY scripts ./scripts
 COPY .linkai ./.linkai
-COPY .claude ./.claude
-COPY .codex ./.codex
-COPY .gemini ./.gemini
-COPY .copilot ./.copilot
-COPY README.md LICENSE.txt AGENT.md AGENTS.md GEMINI.md TODO.md PROGRESS.md ./
+COPY README.md LICENSE.txt ./
 
 RUN chmod +x scripts/*.sh \
   && npm install -g .
