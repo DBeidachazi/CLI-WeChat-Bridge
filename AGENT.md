@@ -29,9 +29,9 @@ This repository bridges WeChat messages into local CLI agents such as Codex, Cla
 
 ## Shared Skills
 
-- Shared project-level skills live under `.aiskill/skills`.
-- Backward compatibility is kept through `.linkai/skills -> .aiskill/skills`.
-- The launcher links `.codex/skills`, `.gemini/skills`, and `.copilot/skills` into the shared skills directory.
+- Shared project-level skills live under `.linkai/skills`.
+- Backward compatibility is kept through `.aiskill/skills -> .linkai/skills`.
+- The launcher links `.claude/skills`, `.codex/skills`, `.gemini/skills`, and `.copilot/skills` into the shared skills directory.
 - The launcher also ensures a generated `wechat-bridge-multimodal` skill exists so supported agents can discover WeChat multimodal input/output behavior on the first turn.
 
 ## Working Rules
@@ -44,7 +44,7 @@ This repository bridges WeChat messages into local CLI agents such as Codex, Cla
 ## Current Focus
 
 - First-turn multimodal capability discovery is now documented and injected into inbound prompts.
-- Shared skill synchronization now targets `.aiskill/skills` with legacy `.linkai/skills` compatibility.
+- Shared skill synchronization now targets `.linkai/skills` with legacy `.aiskill/skills` compatibility.
 - Inbound WeChat image/media ingestion now downloads and decrypts inbound media into local files, prefers encrypted CDN references over plain image URLs, and forwards compatible attachments into ACP prompts.
 - WeChat image key parsing must remain compatible with both direct hex keys and `base64(hex)` `media.aes_key` values, because runtime failures otherwise surface as Gemini `Provided image is not valid` errors.
 - Gemini can also fail on outbound image attempts when the model downloads a non-image file with an image extension; bridge behavior should prefer recovering the session instead of leaving later text-only turns stuck in the same invalid-image state.

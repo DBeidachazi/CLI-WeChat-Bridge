@@ -254,10 +254,11 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 - Git tag
 - 短 SHA tag
 
-## skills 同步
+## skills 与文档同步
 
 第一次运行 `wechat-*-start` 创建 `tmux` session 时，会自动把：
 
+- `.claude/skills`
 - `.codex/skills`
 - `.gemini/skills`
 - `.copilot/skills`
@@ -275,6 +276,22 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 ```
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
+
+共享根目录里的 `AGENT.md`、`GEMINI.md` 和 `skills/*` 也会通过符号链接暴露到：
+
+- `.claude/`
+- `.codex/`
+- `.gemini/`
+- `.copilot/`
+
+Docker 容器启动后，同一套链接会同步到：
+
+- `/root/.claude`
+- `/root/.codex`
+- `/root/.gemini`
+- `/root/.copilot`
+
+同步只会补共享文档和 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。
 
 ## 配置
 

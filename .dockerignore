@@ -6,11 +6,7 @@ home
 .env.*
 .idea
 .vscode
-.claude
-.codex
-.gemini
-.copilot
-.linkai
+*.root-owned.bak
 dist
 coverage
 tmp

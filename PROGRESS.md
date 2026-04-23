@@ -17,7 +17,7 @@
   - terminal create/output/wait/kill/release callbacks
   - local session cache for resume candidates
 - Updated `wechat-*-start` help/output to include Gemini and Copilot.
-- Switched `wechat-*-start` to tmux-backed companion sessions with `.linkai/skills` sync links for `.codex/skills`, `.gemini/skills`, and `.copilot/skills`.
+- Switched `wechat-*-start` to tmux-backed companion sessions with `.linkai/skills` sync links for `.claude/skills`, `.codex/skills`, `.gemini/skills`, and `.copilot/skills`.
 - Switched update checks from rolling 24h cache to a local 5:00 daily window.
 - Added Docker packaging with `imbios/bun-node`, `docker-compose.yml`, `tmux`, `unless-stopped`, `openclaw-net`, `user: "0:0"`, and `./home:/root`.
 - Added runtime bootstrap scripts to auto-install/update Codex, Gemini, Copilot, Claude, and OpenCode inside the container and reinstall the local package globally.
@@ -49,6 +49,8 @@
   - `/ai ...` now forwards slash commands into the active inner AI session, normalizing `/ai status` into `/status`
 - Allowed startup-time adapter switching from WeChat before a disconnected default Codex companion blocks ordinary prompt forwarding.
 - Reverted the two CRLF-polluted history entries (`781e9acbd00e9471af676a2c1e902bbb8880150e` and `5a57671c8449c16f00245fa4e0ef72fc9186815c`) with dedicated revert commits, then removed `.gitattributes` so line-ending policy is no longer enforced from the repo root.
+- Updated the Docker image build to copy repository guidance files and tracked hidden overlay directories into `/app` so container-only workflows can inspect the same docs as the source checkout.
+- Updated the tracked hidden-directory overlay and container bootstrap so shared `.linkai` guidance files are linked into `.claude`, `.codex`, `.gemini`, and `.copilot` in the repo, and into `/root/.claude`, `/root/.codex`, `/root/.gemini`, and `/root/.copilot` inside Docker without overwriting provider-owned files.
 
 ## In Progress
 

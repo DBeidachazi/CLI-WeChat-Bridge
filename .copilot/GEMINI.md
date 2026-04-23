@@ -1,0 +1,1 @@
+../.linkai/GEMINI.md

@@ -8,6 +8,70 @@ cd "${PROJECT_DIR}"
 
 mkdir -p "${HOME}" "${HOME}/.claude/channels/wechat"
 
+sync_shared_ai_overlay() {
+  local shared_root="${PROJECT_DIR}/.linkai"
+  local target_root=""
+  local entry=""
+  local entry_name=""
+  local source_path=""
+  local dest_path=""
+  local skills_dir=""
+
+  if [[ ! -d "${shared_root}" ]]; then
+    return
+  fi
+
+  for target_root in "${HOME}/.claude" "${HOME}/.codex" "${HOME}/.gemini" "${HOME}/.copilot"; do
+    mkdir -p "${target_root}"
+
+    shopt -s nullglob
+    for entry in "${shared_root}"/*; do
+      entry_name="$(basename "${entry}")"
+      if [[ "${entry_name}" == "skills" ]]; then
+        continue
+      fi
+
+      dest_path="${target_root}/${entry_name}"
+      source_path="${entry}"
+      if [[ -L "${dest_path}" ]]; then
+        if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
+          continue
+        fi
+        rm -f "${dest_path}"
+      elif [[ -e "${dest_path}" ]]; then
+        continue
+      fi
+
+      ln -s "${source_path}" "${dest_path}"
+    done
+
+    skills_dir="${target_root}/skills"
+    if [[ -e "${skills_dir}" && ! -d "${skills_dir}" ]]; then
+      shopt -u nullglob
+      continue
+    fi
+    mkdir -p "${skills_dir}"
+
+    for entry in "${shared_root}/skills"/*; do
+      entry_name="$(basename "${entry}")"
+      dest_path="${skills_dir}/${entry_name}"
+      source_path="${entry}"
+
+      if [[ -L "${dest_path}" ]]; then
+        if [[ "$(readlink -f "${dest_path}")" == "$(readlink -f "${source_path}")" ]]; then
+          continue
+        fi
+        rm -f "${dest_path}"
+      elif [[ -e "${dest_path}" ]]; then
+        continue
+      fi
+
+      ln -s "${source_path}" "${dest_path}"
+    done
+    shopt -u nullglob
+  done
+}
+
 ensure_executable_bits() {
   local global_pkg_root
   local targets=()
@@ -72,3 +136,4 @@ fi
 
 npm install -g .
 ensure_executable_bits
+sync_shared_ai_overlay

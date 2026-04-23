@@ -46,10 +46,11 @@ type EndpointReadResult = {
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_ADAPTER: LocalCompanionLaunchAdapter = "codex";
-const SHARED_SKILLS_ROOT = ".aiskill";
+const SHARED_SKILLS_ROOT = ".linkai";
 const SHARED_SKILLS_DIRNAME = "skills";
-const LEGACY_SHARED_SKILLS_ROOT = ".linkai";
+const LEGACY_SHARED_SKILLS_ROOT = ".aiskill";
 const SKILL_LINK_TARGETS = [
+  ".claude/skills",
   ".codex/skills",
   ".gemini/skills",
   ".copilot/skills",

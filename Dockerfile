@@ -11,7 +11,12 @@ RUN npm install
 COPY bin ./bin
 COPY src ./src
 COPY scripts ./scripts
-COPY README.md LICENSE.txt ./
+COPY .linkai ./.linkai
+COPY .claude ./.claude
+COPY .codex ./.codex
+COPY .gemini ./.gemini
+COPY .copilot ./.copilot
+COPY README.md LICENSE.txt AGENT.md AGENTS.md GEMINI.md TODO.md PROGRESS.md ./
 
 RUN chmod +x scripts/*.sh \
   && npm install -g .
