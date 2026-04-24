@@ -4,6 +4,7 @@ import {
   buildAdapterInputFromWechatMessage,
   canDrainDeferredCodexInboundQueue,
   formatBridgeAttachmentLogEntry,
+  formatRecoveredUnavailableCompanionMessage,
   formatBridgeTranscriptLogEntry,
   formatDeferredCodexInboundQueueMessage,
   formatUserFacingBridgeFatalError,
@@ -11,6 +12,7 @@ import {
   formatWechatSendFailureLogEntry,
   isRetryableDeferredCodexDrainError,
   parseCliArgs,
+  shouldAutoRecoverUnavailableCompanion,
   shouldDeferCodexInboundMessage,
   shouldForwardBridgeEventToWechat,
   shouldWatchParentProcess,
@@ -156,6 +158,33 @@ describe("wechat-bridge cli helpers", () => {
         isUserFacingShellRejection: false,
       })
     ).toBe("Bridge error: codex app-server websocket closed unexpectedly.");
+  });
+
+  test("auto-recovers from unavailable codex companion when a previous adapter exists", () => {
+    expect(
+      shouldAutoRecoverUnavailableCompanion({
+        adapter: "codex",
+        errorText:
+          'codex companion is not connected. Run "wechat-codex" in a second terminal for this directory.',
+        previousSelection: {
+          adapter: "gemini",
+          command: "gemini --acp",
+        },
+      })
+    ).toBe(true);
+  });
+
+  test("formats companion recovery notices for WeChat", () => {
+    expect(
+      formatRecoveredUnavailableCompanionMessage({
+        failedAdapter: "codex",
+        restoredAdapter: "gemini",
+        errorText:
+          'codex companion is not connected. Run "wechat-codex" in a second terminal for this directory.',
+      })
+    ).toBe(
+      'Bridge error: codex companion is not connected. Run "wechat-codex" in a second terminal for this directory.\nRecovered by switching back to gemini.'
+    );
   });
 
   test("suppresses noisy OpenCode bridge events from WeChat replies", () => {

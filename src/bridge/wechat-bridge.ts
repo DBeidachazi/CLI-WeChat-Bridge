@@ -333,6 +333,40 @@ function getRuntimeAdapterRenderMode(
     : undefined;
 }
 
+type RecoverableAdapterSelection = {
+  adapter: WechatModelSwitchTarget;
+  command: string;
+};
+
+export function shouldAutoRecoverUnavailableCompanion(params: {
+  adapter: BridgeAdapterKind;
+  errorText: string;
+  previousSelection: RecoverableAdapterSelection | null;
+}): boolean {
+  return (
+    (params.adapter === "codex" ||
+      params.adapter === "claude" ||
+      params.adapter === "opencode") &&
+    /companion is not connected/i.test(params.errorText) &&
+    params.previousSelection !== null
+  );
+}
+
+export function formatRecoveredUnavailableCompanionMessage(params: {
+  failedAdapter: BridgeAdapterKind;
+  restoredAdapter: WechatModelSwitchTarget;
+  errorText: string;
+}): string {
+  return [
+    formatUserFacingInboundError({
+      adapter: params.failedAdapter,
+      errorText: params.errorText,
+      isUserFacingShellRejection: false,
+    }),
+    `Recovered by switching back to ${params.restoredAdapter}.`,
+  ].join("\n");
+}
+
 function formatWechatControlHelp(currentAdapter: BridgeAdapterKind): string {
   return [
     `当前适配器：${currentAdapter}`,
@@ -569,6 +603,7 @@ async function main(): Promise<void> {
   let textSendChain = Promise.resolve();
   let attachmentSendChain = Promise.resolve();
   let activeTask: ActiveTask | null = null;
+  let previousRecoverableSelection: RecoverableAdapterSelection | null = null;
   const deferredInboundMessages: DeferredInboundMessage[] = [];
   let drainingDeferredInboundMessages = false;
   let lastOutputAt = 0;
@@ -664,6 +699,11 @@ async function main(): Promise<void> {
     if (previousAdapter === nextAdapter && options.command === nextCommand) {
       return `Already using ${nextAdapter}.`;
     }
+
+    previousRecoverableSelection = {
+      adapter: previousAdapter as WechatModelSwitchTarget,
+      command: options.command,
+    };
 
     stateStore.clearPendingConfirmation();
     stateStore.clearSharedSessionId();
@@ -1021,6 +1061,31 @@ async function main(): Promise<void> {
           stateStore.appendLog(
             `${isUserFacingShellRejection ? "inbound_rejected" : "inbound_error"}: ${errorText}`
           );
+          if (
+            shouldAutoRecoverUnavailableCompanion({
+              adapter: options.adapter,
+              errorText,
+              previousSelection: previousRecoverableSelection,
+            })
+          ) {
+            const fallbackSelection = previousRecoverableSelection;
+            const failedAdapter = options.adapter;
+            previousRecoverableSelection = null;
+            await switchWechatAdapter(fallbackSelection.adapter);
+            stateStore.appendLog(
+              `auto_recovered_unavailable_companion: ${failedAdapter} -> ${fallbackSelection.adapter}`
+            );
+            await queueWechatMessage(
+              message.senderId,
+              formatRecoveredUnavailableCompanionMessage({
+                failedAdapter,
+                restoredAdapter: fallbackSelection.adapter,
+                errorText,
+              }),
+              "inbound_error"
+            );
+            continue;
+          }
           await queueWechatMessage(
             message.senderId,
             formatUserFacingInboundError({
