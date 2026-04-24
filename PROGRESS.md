@@ -56,6 +56,7 @@
 - Updated the Docker runtime so `/app` stays application source only, provider-readable guidance files are no longer copied there, managed plus `wechat-*-start` bridges default their AI workspace to `/root`, and shared docs still project from `/app/.linkai` via `WECHAT_BRIDGE_SHARED_ROOT`.
 - Added a shared `video-download` skill for CLI-WeChat-Bridge that stores downloads in `~/meidia` and sends them through `wechat-attachments` instead of OpenClaw's `MEDIA:` protocol.
 - Replaced the temporary Codex companion auto-recovery behavior with the real fix: the Docker manager now auto-starts the default Codex tmux companion, and `/model codex` on a persistent bridge starts or reuses the `wechat-codex` tmux companion session before reporting the switch as successful.
+- Suppressed Gemini/Copilot ACP tool progress notices such as `gemini tool:` and `gemini tool update:` from WeChat replies while keeping them in bridge logs.
 
 ## In Progress
 

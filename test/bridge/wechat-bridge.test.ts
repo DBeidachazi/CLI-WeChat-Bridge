@@ -220,6 +220,29 @@ describe("wechat-bridge cli helpers", () => {
     expect(shouldForwardBridgeEventToWechat("shell", "stderr")).toBe(true);
   });
 
+  test("suppresses ACP tool progress notices from WeChat replies", () => {
+    expect(
+      shouldForwardBridgeEventToWechat("gemini", "notice", {
+        text: 'gemini tool: "video-download" (completed)',
+      })
+    ).toBe(false);
+    expect(
+      shouldForwardBridgeEventToWechat("gemini", "notice", {
+        text: "gemini tool update: mkdir -p \"$HOME/meidia\" (completed)",
+      })
+    ).toBe(false);
+    expect(
+      shouldForwardBridgeEventToWechat("copilot", "notice", {
+        text: "copilot tool: read_file (in_progress)",
+      })
+    ).toBe(false);
+    expect(
+      shouldForwardBridgeEventToWechat("gemini", "notice", {
+        text: "Downloading video, this may take a minute.",
+      })
+    ).toBe(true);
+  });
+
   test("defers inbound WeChat text when Codex is busy with a local turn", () => {
     expect(
       shouldDeferCodexInboundMessage({

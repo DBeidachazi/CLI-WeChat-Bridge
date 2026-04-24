@@ -209,6 +209,14 @@ export function shouldForwardBridgeEventToWechat(
     text?: string;
   } = {}
 ): boolean {
+  if (
+    (adapter === "gemini" || adapter === "copilot") &&
+    eventType === "notice" &&
+    /^(?:gemini|copilot) tool(?: update)?:\s*/i.test(options.text ?? "")
+  ) {
+    return false;
+  }
+
   if (adapter !== "opencode") {
     return true;
   }
