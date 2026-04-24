@@ -156,6 +156,43 @@ terminate_managed_bridge() {
   fi
 }
 
+wait_for_managed_bridge_lock() {
+  local expected_pid="${1:-}"
+  local started_at_ms
+  started_at_ms="$(date +%s%3N)"
+
+  while (( "$(date +%s%3N)" - started_at_ms < HANDOFF_GRACE_MS )); do
+    local lock_json
+    if lock_json="$(read_live_bridge_lock_json 2>/dev/null)"; then
+      local lock_pid
+      lock_pid="$(json_field "${lock_json}" pid)"
+      if [[ "${lock_pid}" == "${expected_pid}" ]]; then
+        return 0
+      fi
+    fi
+    sleep 0.25
+  done
+
+  return 1
+}
+
+start_codex_companion_for_managed_bridge() {
+  local bridge_pid="${1:-}"
+  if [[ "${WECHAT_BRIDGE_AUTO_START_CODEX_COMPANION:-true}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! wait_for_managed_bridge_lock "${bridge_pid}"; then
+    echo "[startup] codex bridge lock was not ready; skipping automatic Codex companion start" >&2
+    return 0
+  fi
+
+  echo "[startup] starting managed codex companion tmux session"
+  if ! node --no-warnings --experimental-strip-types src/companion/local-companion-start.ts --adapter codex --cwd "${WECHAT_BRIDGE_WORKDIR}"; then
+    echo "[startup] failed to start managed codex companion; run 'wechat-codex-start' inside the container to retry" >&2
+  fi
+}
+
 on_exit() {
   stop_multi_link_service
   terminate_managed_bridge
@@ -172,6 +209,9 @@ start_managed_bridge() {
   node --no-warnings --experimental-strip-types src/bridge/wechat-bridge.ts --adapter "${adapter}" --cwd "${WECHAT_BRIDGE_WORKDIR}" &
   managed_bridge_pid=$!
   last_managed_bridge_pid="${managed_bridge_pid}"
+  if [[ "${adapter}" == "codex" ]]; then
+    start_codex_companion_for_managed_bridge "${managed_bridge_pid}"
+  fi
 
   set +e
   wait "${managed_bridge_pid}"

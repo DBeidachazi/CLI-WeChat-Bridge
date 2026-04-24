@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   buildBackgroundBridgeArgs,
   buildForegroundClientArgs,
+  buildTmuxSessionName,
   isSameWorkspaceCwd,
   normalizeComparablePath,
   parseCliArgs,
@@ -166,6 +167,17 @@ describe("local-companion-start helpers", () => {
       "--cwd",
       path.resolve("./tmp/project"),
     ]);
+  });
+
+  test("buildTmuxSessionName includes adapter and workspace key", () => {
+    const cwd = path.resolve("./tmp/project");
+    expect(
+      buildTmuxSessionName({
+        adapter: "codex",
+        cwd,
+        timeoutMs: 15_000,
+      })
+    ).toContain("wechat-bridge-codex-");
   });
 
   test("normalizeComparablePath is stable for the same logical cwd", () => {

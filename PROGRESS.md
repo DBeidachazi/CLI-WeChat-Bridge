@@ -55,7 +55,7 @@
 - Added LinkAI document version detection so `.linkai/config/markdown.xml` can advance `AGENT.shared.md` from the implicit initial `1.0.0` by appending missing version patch files from `.linkai/config`.
 - Updated the Docker runtime so `/app` stays application source only, provider-readable guidance files are no longer copied there, managed plus `wechat-*-start` bridges default their AI workspace to `/root`, and shared docs still project from `/app/.linkai` via `WECHAT_BRIDGE_SHARED_ROOT`.
 - Added a shared `video-download` skill for CLI-WeChat-Bridge that stores downloads in `~/meidia` and sends them through `wechat-attachments` instead of OpenClaw's `MEDIA:` protocol.
-- Added automatic recovery when WeChat switches to a manual-companion adapter like Codex but the companion is not connected: the bridge now restores the previous adapter instead of leaving the chat stuck on an unavailable model.
+- Replaced the temporary Codex companion auto-recovery behavior with the real fix: the Docker manager now auto-starts the default Codex tmux companion, and `/model codex` on a persistent bridge starts or reuses the `wechat-codex` tmux companion session before reporting the switch as successful.
 
 ## In Progress
 
@@ -65,7 +65,7 @@
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
   - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
   - confirm a bad outbound Gemini image candidate no longer poisons later text-only turns
-  - confirm `/model gemini` works from WeChat even when the default Codex companion is disconnected
+  - confirm `/model gemini` and `/model codex` work from WeChat, including Codex companion tmux auto-start after switching back from Gemini
   - confirm `/ai status` and `/ai model ...` reach the inner AI instead of being intercepted by the outer bridge
   - confirm inbound voice/file/video handling remains stable
   - inspect any host-specific path, dependency, or credential issues on `192.168.1.111`

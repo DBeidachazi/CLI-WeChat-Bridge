@@ -542,6 +542,27 @@ function ensureTmuxSession(options: LocalCompanionStartCliOptions): {
   return { sessionName, created: true };
 }
 
+export function ensureTmuxCompanionSessionForRunningBridge(options: {
+  adapter: LocalCompanionLaunchAdapter;
+  cwd: string;
+  profile?: string;
+  timeoutMs?: number;
+}): {
+  sessionName: string;
+  created: boolean;
+} {
+  if (!isTmuxAvailable()) {
+    throw new Error("tmux is not available.");
+  }
+
+  return ensureTmuxSession({
+    adapter: options.adapter,
+    cwd: options.cwd,
+    profile: options.profile,
+    timeoutMs: options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS,
+  });
+}
+
 async function runVisibleClientDirect(
   options: LocalCompanionStartCliOptions
 ): Promise<number> {

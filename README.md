@@ -26,6 +26,7 @@
 - 把微信和 CLI 的往返文本转录打印到 `docker logs`
 - `wechat-gemini-start` / `wechat-copilot-start` 这类替换 bridge 的后台日志同样会进入 `docker logs`
 - 容器内部安装 `tmux`
+- 默认适配器是 `codex` 时，容器启动后会自动创建 `wechat-codex` 的 `tmux` companion session
 - 允许你在容器里直接执行 `wechat-codex-start`、`wechat-gemini-start` 之类的命令切换当前活动适配器
 
 ## 重要行为
@@ -35,9 +36,10 @@
 1. 一个容器内同一时刻只有一个活动 bridge。
 2. `wechat-codex-start`、`wechat-gemini-start`、`wechat-copilot-start` 这类命令会复用当前工作区 bridge，或者替换掉旧 bridge。
 3. 如果你正在用 `codex`，再运行 `wechat-gemini-start`，当前 bridge 会被切换到 `gemini`。
-4. Docker 模式下容器主进程是 manager，不再是单个 bridge 本体，所以切换适配器不会再把整个容器一起杀掉。
-5. `tmux` session 只有在第一次运行 `wechat-*-start` 时才会创建；刚进容器时 `tmux ls` 为空是正常的。
-6. `tmux` 模式下，`wechat-*-start` 后台 bridge 现在按 `persistent` 启动，不会因为 launcher 进程退出就被误回收。
+4. 如果你已经通过微信 `/model gemini` 切走，再用 `/model codex` 切回，bridge 会自动创建或复用 `wechat-codex` 的 `tmux` companion session；不用再手动进容器跑一次 `wechat-codex-start`。
+5. Docker 模式下容器主进程是 manager，不再是单个 bridge 本体，所以切换适配器不会再把整个容器一起杀掉。
+6. `tmux` session 只有在第一次运行 `wechat-*-start` 或微信 `/model codex` 自动拉起 Codex companion 时才会创建；刚进容器时 `tmux ls` 为空是正常的。
+7. `tmux` 模式下，`wechat-*-start` 后台 bridge 现在按 `persistent` 启动，不会因为 launcher 进程退出就被误回收。
 
 ## Docker Compose 快速开始
 

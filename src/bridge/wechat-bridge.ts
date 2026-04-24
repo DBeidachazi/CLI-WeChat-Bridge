@@ -2,6 +2,7 @@
 
 import path from "node:path";
 import { clearLocalCompanionEndpoint } from "../companion/local-companion-link.ts";
+import { ensureTmuxCompanionSessionForRunningBridge } from "../companion/local-companion-start.ts";
 import { shouldLogBridgeTranscript } from "../config/bridge-config.ts";
 import {
   checkForUpdate,
@@ -333,40 +334,6 @@ function getRuntimeAdapterRenderMode(
     : undefined;
 }
 
-type RecoverableAdapterSelection = {
-  adapter: WechatModelSwitchTarget;
-  command: string;
-};
-
-export function shouldAutoRecoverUnavailableCompanion(params: {
-  adapter: BridgeAdapterKind;
-  errorText: string;
-  previousSelection: RecoverableAdapterSelection | null;
-}): boolean {
-  return (
-    (params.adapter === "codex" ||
-      params.adapter === "claude" ||
-      params.adapter === "opencode") &&
-    /companion is not connected/i.test(params.errorText) &&
-    params.previousSelection !== null
-  );
-}
-
-export function formatRecoveredUnavailableCompanionMessage(params: {
-  failedAdapter: BridgeAdapterKind;
-  restoredAdapter: WechatModelSwitchTarget;
-  errorText: string;
-}): string {
-  return [
-    formatUserFacingInboundError({
-      adapter: params.failedAdapter,
-      errorText: params.errorText,
-      isUserFacingShellRejection: false,
-    }),
-    `Recovered by switching back to ${params.restoredAdapter}.`,
-  ].join("\n");
-}
-
 function formatWechatControlHelp(currentAdapter: BridgeAdapterKind): string {
   return [
     `当前适配器：${currentAdapter}`,
@@ -381,6 +348,32 @@ function formatWechatControlHelp(currentAdapter: BridgeAdapterKind): string {
     "/reset - 重置当前会话",
     "/stop - 中断当前任务",
   ].join("\n");
+}
+
+export function shouldAutoStartCodexCompanionForSwitch(params: {
+  adapter: BridgeAdapterKind;
+  lifecycle: BridgeLifecycleMode;
+}): boolean {
+  return params.adapter === "codex" && params.lifecycle === "persistent";
+}
+
+async function waitForCompanionAdapterReady(
+  adapter: BridgeAdapter,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const state = adapter.getState();
+    if (state.status === "idle" && typeof state.pid === "number") {
+      return;
+    }
+    await delay(250);
+  }
+
+  throw new Error(
+    `${adapter.getState().kind} companion did not become ready within ${Math.ceil(timeoutMs / 1000)}s.`
+  );
 }
 
 export function isRetryableDeferredCodexDrainError(errorText: string): boolean {
@@ -603,7 +596,6 @@ async function main(): Promise<void> {
   let textSendChain = Promise.resolve();
   let attachmentSendChain = Promise.resolve();
   let activeTask: ActiveTask | null = null;
-  let previousRecoverableSelection: RecoverableAdapterSelection | null = null;
   const deferredInboundMessages: DeferredInboundMessage[] = [];
   let drainingDeferredInboundMessages = false;
   let lastOutputAt = 0;
@@ -700,11 +692,6 @@ async function main(): Promise<void> {
       return `Already using ${nextAdapter}.`;
     }
 
-    previousRecoverableSelection = {
-      adapter: previousAdapter as WechatModelSwitchTarget,
-      command: options.command,
-    };
-
     stateStore.clearPendingConfirmation();
     stateStore.clearSharedSessionId();
     stateStore.clearClaudeResumeState();
@@ -728,6 +715,22 @@ async function main(): Promise<void> {
     });
     wireCurrentAdapter();
     await adapter.start();
+    if (
+      shouldAutoStartCodexCompanionForSwitch({
+        adapter: options.adapter,
+        lifecycle: options.lifecycle,
+      })
+    ) {
+      const tmuxSession = ensureTmuxCompanionSessionForRunningBridge({
+        adapter: "codex",
+        cwd: options.cwd,
+        profile: options.profile,
+      });
+      stateStore.appendLog(
+        `auto_started_codex_companion: session=${tmuxSession.sessionName} created=${tmuxSession.created}`
+      );
+      await waitForCompanionAdapterReady(adapter, 15_000);
+    }
     syncSharedSessionState(stateStore, adapter);
     stateStore.appendLog(
       `wechatmodel_switch: ${previousAdapter} -> ${nextAdapter}`
@@ -1061,31 +1064,6 @@ async function main(): Promise<void> {
           stateStore.appendLog(
             `${isUserFacingShellRejection ? "inbound_rejected" : "inbound_error"}: ${errorText}`
           );
-          if (
-            shouldAutoRecoverUnavailableCompanion({
-              adapter: options.adapter,
-              errorText,
-              previousSelection: previousRecoverableSelection,
-            })
-          ) {
-            const fallbackSelection = previousRecoverableSelection;
-            const failedAdapter = options.adapter;
-            previousRecoverableSelection = null;
-            await switchWechatAdapter(fallbackSelection.adapter);
-            stateStore.appendLog(
-              `auto_recovered_unavailable_companion: ${failedAdapter} -> ${fallbackSelection.adapter}`
-            );
-            await queueWechatMessage(
-              message.senderId,
-              formatRecoveredUnavailableCompanionMessage({
-                failedAdapter,
-                restoredAdapter: fallbackSelection.adapter,
-                errorText,
-              }),
-              "inbound_error"
-            );
-            continue;
-          }
           await queueWechatMessage(
             message.senderId,
             formatUserFacingInboundError({
