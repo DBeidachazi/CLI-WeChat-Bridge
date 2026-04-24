@@ -46,7 +46,7 @@
 ### 1. 启动容器
 
 ```bash
-git clone https://github.com/UNLINEARITY/CLI-WeChat-Bridge
+git clone https://github.com/DBeidachazi/CLI-WeChat-Bridge
 cd CLI-WeChat-Bridge
 docker compose up --build -d
 ```
