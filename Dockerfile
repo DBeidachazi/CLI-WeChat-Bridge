@@ -1,6 +1,6 @@
 FROM imbios/bun-node:latest-24-debian
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends tmux git ca-certificates build-essential python3 \
+  && apt-get install -y --no-install-recommends tmux git ca-certificates build-essential python3 curl wget xz-utils \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -141,6 +141,7 @@ ensure_executable_bits() {
   shopt -s nullglob
   targets+=("${PROJECT_DIR}"/bin/*.mjs)
   targets+=("${PROJECT_DIR}"/scripts/*.sh)
+  targets+=("${PROJECT_DIR}"/.linkai/skills/*/scripts/*.sh)
   global_pkg_root="$(npm root -g 2>/dev/null || true)"
   if [[ -n "${global_pkg_root}" ]]; then
     targets+=("${global_pkg_root}"/@unlinearity/cli-wechat-bridge/bin/*.mjs)

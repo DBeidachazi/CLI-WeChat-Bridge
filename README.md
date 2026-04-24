@@ -279,7 +279,7 @@ docker.io/<DOCKERHUB_USERNAME>/cli-wechat-bridge
 
 这样不同 CLI 的 skills 可以共用，而且共享目录里会自动生成一个 WeChat 多模态能力 skill，帮助 Codex/Gemini/Copilot 在首轮就知道自己能处理微信语音转写、图片/媒体输入，以及 `wechat-attachments` 输出协议。
 
-共享 skills 必须使用文件夹结构，例如 `.linkai/skills/video-download/SKILL.md`。视频下载 skill 默认把文件保存到 `~/meidia`，并通过本项目的 `wechat-attachments` 代码块发送，不使用 OpenClaw 的 `MEDIA:` 协议。
+共享 skills 必须使用文件夹结构，例如 `.linkai/skills/video-download/SKILL.md`。视频下载 skill 默认把文件保存到 `~/meidia`，并通过本项目的 `wechat-attachments` 代码块发送，不使用 OpenClaw 的 `MEDIA:` 协议。它会优先直接运行容器里的 `yt-dlp` / `ffmpeg`，缺失时再按容器架构从 `yt-dlp/yt-dlp` 和 `BtbN/FFmpeg-Builds` 的 latest release 下载二进制文件到 `~/.local/bin`。
 
 为了避免 Gemini / Claude / Copilot 在项目目录里重复读到多份同名指令文件，`.linkai` 里的共享文档源文件只保留一份：
 
@@ -308,6 +308,15 @@ Docker 容器启动后，同一套链接会同步到：
 - `/root/.copilot`
 
 同步只会补共享文档和 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。
+
+如果你在服务器上使用已经发布到 Docker Hub 的镜像，执行：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+容器重建后会带上镜像里的最新 `.linkai/skills`。启动脚本会再次同步 shared skills 到 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot`；如果宿主文件系统不支持 symlink，multi-link 同步服务也会继续把新的 skill 文件复制/同步过去。
 
 如果容器的 `/root` 挂载在不支持符号链接的文件系统上，例如 `exfat`，启动时会自动拉起 `scripts/multi-link-service.cjs`。这个基于 `chokidar` 的常驻同步服务会持续把 `.linkai` 与 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot` 之间的共享文档和 `skills` 做多向同步，用文件同步来模拟 link 效果，而不是一次性复制后就失联。
 

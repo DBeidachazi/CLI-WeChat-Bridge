@@ -34,13 +34,29 @@ helper="$(find "$HOME" -path '*/skills/video-download/scripts/download-video.sh'
 "$helper" "https://example.com/video"
 ```
 
-The helper runs `yt-dlp` directly. If `yt-dlp` is missing, it installs `yt-dlp-dl` globally with npm, downloads the `yt-dlp` binary into `~/.local/bin`, and retries.
+The helper runs `yt-dlp` directly. If `yt-dlp`, `ffmpeg`, or `ffprobe` is missing, it calls the bundled `install-video-tools.sh` script. That installer detects the container CPU architecture and libc, then downloads upstream release binaries from:
+
+- `yt-dlp/yt-dlp` latest release
+- `BtbN/FFmpeg-Builds` latest release
+
+On ARM64 Linux Docker, it uses `yt-dlp_linux_aarch64` or `yt-dlp_musllinux_aarch64`, and `ffmpeg-master-latest-linuxarm64-gpl.tar.xz`.
 
 If running manually, use this pattern:
 
 ```bash
 yt-dlp --merge-output-format mp4 -o "$HOME/meidia/%(extractor)s_%(id)s.%(ext)s" "VIDEO_URL"
 ```
+
+For Bilibili 1080p, login cookies may be required. If the user sends cookies, save them to:
+
+```bash
+mkdir -p "$HOME/.config/cli-wechat-bridge/cookies"
+chmod 700 "$HOME/.config/cli-wechat-bridge/cookies"
+cat > "$HOME/.config/cli-wechat-bridge/cookies/bilibili.txt"
+chmod 600 "$HOME/.config/cli-wechat-bridge/cookies/bilibili.txt"
+```
+
+The helper automatically uses that cookie file. It requests up to 1080p, prefers H.264 when available, and transcodes the final file to H.264/AAC MP4 if the downloaded video is not H.264/H.265 or the audio is not AAC.
 
 3. Verify the resulting file exists and is non-empty:
 
@@ -58,5 +74,5 @@ video /absolute/path/to/downloaded.mp4
 
 - In Docker, `$HOME` is normally `/root`, so `~/meidia` becomes `/root/meidia`.
 - Use `.mp4` when possible because WeChat video upload is most reliable with MP4.
-- If `yt-dlp` is not installed, install it first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
+- If `yt-dlp` is not installed, run the bundled installer first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
 - If the file is too large for WeChat, try a lower format or transcode/compress before sending.
