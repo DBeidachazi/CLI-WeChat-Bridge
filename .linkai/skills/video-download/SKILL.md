@@ -70,9 +70,12 @@ ls -lh "$HOME/meidia"
 video /absolute/path/to/downloaded.mp4
 ```
 
+Do not run `rm` on the attachment file before returning the final reply. CLI-WeChat-Bridge needs the file to still exist while it uploads the attachment.
+
 ## Notes
 
 - In Docker, `$HOME` is normally `/root`, so `~/meidia` becomes `/root/meidia`.
 - Use `.mp4` when possible because WeChat video upload is most reliable with MP4.
 - If `yt-dlp` is not installed, run the bundled installer first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
 - Files up to 300MB are within the bridge's default video limit. Do not tell the AI to shrink or transcode just to reduce size unless the final file exceeds 300MB or the codec/container is not WeChat-friendly.
+- Files sent from `~/meidia` are cleaned up by the bridge after a successful WeChat upload. The helper also deletes the original pre-transcode file when it creates a `.wechat.mp4` replacement.

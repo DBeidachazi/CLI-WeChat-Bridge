@@ -77,6 +77,7 @@ else
 fi
 
 if [[ "${video_ok}" == "false" || "${audio_ok}" == "false" ]]; then
+  source_path="${downloaded_path}"
   converted_path="${downloaded_path%.*}.wechat.mp4"
   ffmpeg -y -i "${downloaded_path}" \
     -map 0:v:0 -map 0:a? \
@@ -85,6 +86,7 @@ if [[ "${video_ok}" == "false" || "${audio_ok}" == "false" ]]; then
     -movflags +faststart \
     "${converted_path}" >&2
   downloaded_path="${converted_path}"
+  rm -f "${source_path}"
 fi
 
 printf '%s\n' "${downloaded_path}"
