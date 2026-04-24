@@ -1,18 +1,35 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { forwardWechatFinalReply } from "../../src/bridge/bridge-final-reply.ts";
+
+const tempPaths: string[] = [];
+
+afterEach(() => {
+  while (tempPaths.length > 0) {
+    const target = tempPaths.pop();
+    if (!target) {
+      continue;
+    }
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
 
 describe("forwardWechatFinalReply", () => {
   test("sends stripped text before attachments in listed order", async () => {
     const calls: string[] = [];
+    const imagePath = "/tmp/wechat-bridge-photo.jpg";
+    const filePath = "/tmp/wechat-bridge-report.pdf";
 
     await forwardWechatFinalReply({
       adapter: "codex",
       rawText: [
         "Artifacts are ready.",
         "```wechat-attachments",
-        "image C:\\Users\\unlin\\Desktop\\photo.jpg",
-        "file C:\\Users\\unlin\\Desktop\\report.pdf",
+        `image ${imagePath}`,
+        `file ${filePath}`,
         "```",
       ].join("\n"),
       sender: {
@@ -36,20 +53,22 @@ describe("forwardWechatFinalReply", () => {
 
     expect(calls).toEqual([
       "text:Artifacts are ready.",
-      "image:C:\\Users\\unlin\\Desktop\\photo.jpg",
-      "file:C:\\Users\\unlin\\Desktop\\report.pdf",
+      `image:${imagePath}`,
+      `file:${filePath}`,
     ]);
   });
 
   test("continues after attachment failures and reports the error in text", async () => {
     const calls: string[] = [];
+    const imagePath = "/tmp/wechat-bridge-broken.jpg";
+    const filePath = "/tmp/wechat-bridge-report.pdf";
 
     await forwardWechatFinalReply({
       adapter: "claude",
       rawText: [
         "```wechat-attachments",
-        "image C:\\Users\\unlin\\Desktop\\broken.jpg",
-        "file C:\\Users\\unlin\\Desktop\\report.pdf",
+        `image ${imagePath}`,
+        `file ${filePath}`,
         "```",
       ].join("\n"),
       sender: {
@@ -72,18 +91,19 @@ describe("forwardWechatFinalReply", () => {
     });
 
     expect(calls).toEqual([
-      "text:Failed to send image attachment: C:\\Users\\unlin\\Desktop\\broken.jpg\nupload failed",
-      "file:C:\\Users\\unlin\\Desktop\\report.pdf",
+      `text:Failed to send image attachment: ${imagePath}\nupload failed`,
+      `file:${filePath}`,
     ]);
   });
 
-  test("auto-sends inline local text files as file attachments", async () => {
+  test("keeps inline local text file paths in visible text when they are not promoted to attachments", async () => {
     const calls: string[] = [];
+    const filePath = "/tmp/wechat-bridge-summary.txt";
 
     await forwardWechatFinalReply({
       adapter: "codex",
       rawText: [
-        "Saved note to `C:\\Users\\unlin\\Desktop\\exports\\summary.txt`.",
+        `Saved note to \`${filePath}\`.`,
         "Review it.",
       ].join("\n"),
       sender: {
@@ -106,8 +126,7 @@ describe("forwardWechatFinalReply", () => {
     });
 
     expect(calls).toEqual([
-      "text:Saved note to .\nReview it.",
-      "file:C:\\Users\\unlin\\Desktop\\exports\\summary.txt",
+      `text:Saved note to \`${filePath}\`.\nReview it.`,
     ]);
   });
 
@@ -183,5 +202,67 @@ describe("forwardWechatFinalReply", () => {
     expect(calls).toEqual([
       "text:我是opencode，由nemotron-3-super-free模型驱动，模型ID是opencode/nemotron-3-super-free。有什么我可以帮助你的吗？",
     ]);
+  });
+
+  test("deletes successfully sent meidia attachments after upload", async () => {
+    const mediaDir = path.join(
+      os.homedir(),
+      "meidia",
+      `bridge-final-reply-test-${Date.now()}`
+    );
+    const videoPath = path.join(mediaDir, "clip.mp4");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.writeFileSync(videoPath, "video-bytes");
+    tempPaths.push(mediaDir);
+
+    await forwardWechatFinalReply({
+      adapter: "codex",
+      rawText: [
+        "```wechat-attachments",
+        `video ${videoPath}`,
+        "```",
+      ].join("\n"),
+      sender: {
+        sendText: async () => undefined,
+        sendImage: async () => undefined,
+        sendFile: async () => undefined,
+        sendVoice: async () => undefined,
+        sendVideo: async () => undefined,
+      },
+    });
+
+    expect(fs.existsSync(videoPath)).toBe(false);
+  });
+
+  test("keeps managed attachments when upload fails", async () => {
+    const mediaDir = path.join(
+      os.homedir(),
+      "meidia",
+      `bridge-final-reply-test-${Date.now()}-fail`
+    );
+    const videoPath = path.join(mediaDir, "clip.mp4");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.writeFileSync(videoPath, "video-bytes");
+    tempPaths.push(mediaDir);
+
+    await forwardWechatFinalReply({
+      adapter: "codex",
+      rawText: [
+        "```wechat-attachments",
+        `video ${videoPath}`,
+        "```",
+      ].join("\n"),
+      sender: {
+        sendText: async () => undefined,
+        sendImage: async () => undefined,
+        sendFile: async () => undefined,
+        sendVoice: async () => undefined,
+        sendVideo: async () => {
+          throw new Error("upload failed");
+        },
+      },
+    });
+
+    expect(fs.existsSync(videoPath)).toBe(true);
   });
 });

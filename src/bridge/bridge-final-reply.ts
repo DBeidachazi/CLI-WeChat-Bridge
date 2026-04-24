@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import type { BridgeAdapterKind } from "./bridge-types.ts";
 import {
   formatFinalReplyMessage,
@@ -12,6 +16,32 @@ export type WechatFinalReplySender = {
   sendVoice: (voicePath: string) => Promise<unknown>;
   sendVideo: (videoPath: string) => Promise<unknown>;
 };
+
+const AUTO_CLEANUP_MEDIA_DIR = path.join(os.homedir(), "meidia");
+
+function shouldAutoCleanupAttachment(filePath: string): boolean {
+  const normalizedPath = path.resolve(filePath);
+  const mediaRoot = path.resolve(AUTO_CLEANUP_MEDIA_DIR);
+
+  return (
+    normalizedPath === mediaRoot ||
+    normalizedPath.startsWith(`${mediaRoot}${path.sep}`)
+  );
+}
+
+function cleanupManagedAttachment(filePath: string): void {
+  if (!shouldAutoCleanupAttachment(filePath)) {
+    return;
+  }
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+  if (!fs.statSync(filePath).isFile()) {
+    return;
+  }
+
+  fs.rmSync(filePath, { force: true });
+}
 
 export async function forwardWechatFinalReply(params: {
   adapter: BridgeAdapterKind;
@@ -45,6 +75,8 @@ export async function forwardWechatFinalReply(params: {
           await sender.sendVideo(attachment.path);
           break;
       }
+
+      cleanupManagedAttachment(attachment.path);
     } catch (error) {
       const errorText =
         error instanceof Error
