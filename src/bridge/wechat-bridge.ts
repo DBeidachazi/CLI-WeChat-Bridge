@@ -69,6 +69,7 @@ type BridgeCliOptions = {
 type ActiveTask = {
   startedAt: number;
   inputPreview: string;
+  recipientId: string;
 };
 
 type WechatModelSwitchTarget = BridgeAdapterKind;
@@ -95,6 +96,7 @@ type WechatSendContext =
 const POLL_RETRY_BASE_MS = 1000;
 const POLL_RETRY_MAX_MS = 30_000;
 const PARENT_PROCESS_POLL_MS = 5000;
+const WECHAT_TYPING_KEEPALIVE_MS = 5000;
 
 function log(message: string): void {
   process.stderr.write(`[wechat-bridge] ${message}\n`);
@@ -209,6 +211,15 @@ export function shouldForwardBridgeEventToWechat(
     text?: string;
   } = {}
 ): boolean {
+  if (
+    eventType === "notice" &&
+    /^(?:Claude|OpenCode|gemini|copilot|codex|shell) is still working on:\s*/i.test(
+      options.text ?? ""
+    )
+  ) {
+    return false;
+  }
+
   if (
     (adapter === "gemini" || adapter === "copilot") &&
     eventType === "notice" &&
@@ -604,6 +615,8 @@ async function main(): Promise<void> {
   let textSendChain = Promise.resolve();
   let attachmentSendChain = Promise.resolve();
   let activeTask: ActiveTask | null = null;
+  let typingKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  let typingKeepaliveRecipientId: string | null = null;
   const deferredInboundMessages: DeferredInboundMessage[] = [];
   let drainingDeferredInboundMessages = false;
   let lastOutputAt = 0;
@@ -656,6 +669,48 @@ async function main(): Promise<void> {
   const outputBatcher = new OutputBatcher(async (text) => {
     await queueWechatMessage(stateStore.getState().authorizedUserId, text);
   });
+
+  const stopWechatTypingKeepalive = () => {
+    if (typingKeepaliveTimer) {
+      clearInterval(typingKeepaliveTimer);
+      typingKeepaliveTimer = null;
+    }
+
+    const recipientId = typingKeepaliveRecipientId;
+    typingKeepaliveRecipientId = null;
+    if (!recipientId) {
+      return;
+    }
+
+    void transport.sendTyping(recipientId, "cancel").catch((err) => {
+      logError(
+        `Failed to cancel WeChat typing indicator: ${describeWechatTransportError(err)}`
+      );
+    });
+  };
+
+  const startWechatTypingKeepalive = (recipientId: string) => {
+    if (typingKeepaliveRecipientId === recipientId && typingKeepaliveTimer) {
+      return;
+    }
+
+    stopWechatTypingKeepalive();
+    typingKeepaliveRecipientId = recipientId;
+    void transport.sendTyping(recipientId, "typing").catch((err) => {
+      logError(
+        `Failed to send initial WeChat typing indicator: ${describeWechatTransportError(err)}`
+      );
+    });
+    typingKeepaliveTimer = setInterval(() => {
+      void transport.sendTyping(recipientId, "typing").catch((err) => {
+        logError(
+          `Failed to refresh WeChat typing indicator: ${describeWechatTransportError(err)}`
+        );
+      });
+    }, WECHAT_TYPING_KEEPALIVE_MS);
+    typingKeepaliveTimer.unref?.();
+  };
+
   const wireCurrentAdapter = () => {
     wireAdapterEvents({
       adapter,
@@ -670,6 +725,7 @@ async function main(): Promise<void> {
       clearActiveTask: () => {
         activeTask = null;
         lastHeartbeatAt = 0;
+        stopWechatTypingKeepalive();
       },
       updateLastOutputAt: () => {
         lastOutputAt = Date.now();
@@ -784,6 +840,7 @@ async function main(): Promise<void> {
         adapter,
       });
       activeTask = nextTask;
+      startWechatTypingKeepalive(nextTask.recipientId);
       lastHeartbeatAt = 0;
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err);
@@ -1085,6 +1142,7 @@ async function main(): Promise<void> {
         }
         if (nextTask) {
           activeTask = nextTask;
+          startWechatTypingKeepalive(nextTask.recipientId);
           lastHeartbeatAt = 0;
         }
         syncSharedSessionState(stateStore, adapter);
@@ -1661,6 +1719,7 @@ async function dispatchInboundWechatText(params: {
   const activeTask = {
     startedAt: Date.now(),
     inputPreview: truncatePreview(previewSource, 180),
+    recipientId: message.senderId,
   };
   stateStore.appendLog(
     `Forwarded input to ${options.adapter}: ${truncatePreview(previewSource)}`

@@ -19,6 +19,7 @@ const CHANNEL_VERSION = "0.3.0";
 const RECENT_MESSAGE_CACHE_SIZE = 500;
 const BYTES_PER_MB = 1024 * 1024;
 const SEND_TIMEOUT_MS = 15_000;
+const CONFIG_TIMEOUT_MS = 10_000;
 const CDN_MAX_RETRIES = 3;
 const ERROR_CAUSE_DEPTH_LIMIT = 4;
 const INBOUND_MESSAGE_CLAIM_TTL_MS = 10 * 60 * 1000;
@@ -33,6 +34,8 @@ const MSG_ITEM_FILE = 4;
 const MSG_ITEM_VIDEO = 5;
 
 const MSG_STATE_FINISH = 2;
+const TYPING_STATUS_TYPING = 1;
+const TYPING_STATUS_CANCEL = 2;
 
 const UPLOAD_MEDIA_TYPE_IMAGE = 1;
 const UPLOAD_MEDIA_TYPE_VIDEO = 2;
@@ -211,7 +214,7 @@ const DEFAULT_MEDIA_UPLOAD_LIMIT_MB: Record<UploadLabel, number> = {
   image: 20,
   file: 50,
   voice: 20,
-  video: 100,
+  video: 300,
 };
 
 const MEDIA_UPLOAD_LIMIT_ENV_KEYS: Record<UploadLabel, string> = {
@@ -1172,6 +1175,7 @@ export class WeChatTransport {
   private readonly contextTokenCache = new Map<string, string>(
     Object.entries(readJsonFile<ContextTokenState>(CONTEXT_CACHE_FILE) ?? {})
   );
+  private readonly typingTicketCache = new Map<string, string | null>();
   private syncBuffer = "";
 
   constructor(logger: TransportLogger) {
@@ -1348,6 +1352,42 @@ export class WeChatTransport {
       trimmed,
       resolved.contextToken
     );
+    return resolved.recipientId;
+  }
+
+  async sendTyping(
+    recipientId?: string,
+    status: "typing" | "cancel" = "typing"
+  ): Promise<string> {
+    const resolved = this.resolveRecipient(recipientId);
+    const typingTicket = await this.getTypingTicket(
+      resolved.account,
+      resolved.recipientId,
+      resolved.contextToken
+    );
+    if (!typingTicket) {
+      this.logger.log(
+        `Typing indicator unavailable for ${resolved.recipientId}: no typing ticket returned by getconfig.`
+      );
+      return resolved.recipientId;
+    }
+
+    await apiFetch({
+      baseUrl: resolved.account.baseUrl,
+      endpoint: "ilink/bot/sendtyping",
+      body: JSON.stringify({
+        ilink_user_id: resolved.recipientId,
+        typing_ticket: typingTicket,
+        status:
+          status === "typing"
+            ? TYPING_STATUS_TYPING
+            : TYPING_STATUS_CANCEL,
+        base_info: { channel_version: CHANNEL_VERSION },
+      }),
+      token: resolved.account.token,
+      timeoutMs: CONFIG_TIMEOUT_MS,
+    });
+
     return resolved.recipientId;
   }
 
@@ -1545,6 +1585,35 @@ export class WeChatTransport {
     return { account, recipientId: resolvedRecipientId, contextToken };
   }
 
+  private async getTypingTicket(
+    account: AccountData,
+    recipientId: string,
+    contextToken: string
+  ): Promise<string | null> {
+    if (this.typingTicketCache.has(recipientId)) {
+      return this.typingTicketCache.get(recipientId) ?? null;
+    }
+
+    const raw = await apiFetch({
+      baseUrl: account.baseUrl,
+      endpoint: "ilink/bot/getconfig",
+      body: JSON.stringify({
+        ilink_user_id: recipientId,
+        context_token: contextToken,
+        base_info: { channel_version: CHANNEL_VERSION },
+      }),
+      token: account.token,
+      timeoutMs: CONFIG_TIMEOUT_MS,
+    });
+    const parsed = JSON.parse(raw) as { typing_ticket?: unknown };
+    const typingTicket =
+      typeof parsed.typing_ticket === "string" && parsed.typing_ticket.trim()
+        ? parsed.typing_ticket.trim()
+        : null;
+    this.typingTicketCache.set(recipientId, typingTicket);
+    return typingTicket;
+  }
+
   private async sendTextWithContextToken(
     account: AccountData,
     recipientId: string,
@@ -1738,6 +1807,7 @@ export class WeChatTransport {
       this.contextTokenCache.delete(senderId);
     }
     this.contextTokenCache.set(senderId, token);
+    this.typingTicketCache.delete(senderId);
     writeJsonFile(
       CONTEXT_CACHE_FILE,
       Object.fromEntries(this.contextTokenCache)
@@ -1746,6 +1816,7 @@ export class WeChatTransport {
 
   private clearContextTokenCache(): void {
     this.contextTokenCache.clear();
+    this.typingTicketCache.clear();
     if (fs.existsSync(CONTEXT_CACHE_FILE)) {
       fs.rmSync(CONTEXT_CACHE_FILE, { force: true });
     }

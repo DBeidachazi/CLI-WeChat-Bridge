@@ -75,4 +75,4 @@ video /absolute/path/to/downloaded.mp4
 - In Docker, `$HOME` is normally `/root`, so `~/meidia` becomes `/root/meidia`.
 - Use `.mp4` when possible because WeChat video upload is most reliable with MP4.
 - If `yt-dlp` is not installed, run the bundled installer first; do not fall back to sending a remote video URL unless the user explicitly allows a link.
-- If the file is too large for WeChat, try a lower format or transcode/compress before sending.
+- Files up to 300MB are within the bridge's default video limit. Do not tell the AI to shrink or transcode just to reduce size unless the final file exceeds 300MB or the codec/container is not WeChat-friendly.

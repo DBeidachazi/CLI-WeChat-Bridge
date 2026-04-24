@@ -214,9 +214,31 @@ describe("wechat-bridge cli helpers", () => {
     );
   });
 
+  test("suppresses all visible working notices because typing keepalive owns progress", () => {
+    expect(
+      shouldForwardBridgeEventToWechat("claude", "notice", {
+        text: "Claude is still working on:\nReview the bridge",
+      })
+    ).toBe(false);
+    expect(
+      shouldForwardBridgeEventToWechat("opencode", "notice", {
+        text: "OpenCode is still working on:\nReview the bridge",
+      })
+    ).toBe(false);
+    expect(
+      shouldForwardBridgeEventToWechat("gemini", "notice", {
+        text: "gemini is still working on:\nReview the bridge",
+      })
+    ).toBe(false);
+  });
+
   test("keeps non-OpenCode adapters forwarding bridge events", () => {
     expect(shouldForwardBridgeEventToWechat("codex", "stdout")).toBe(true);
-    expect(shouldForwardBridgeEventToWechat("claude", "notice")).toBe(true);
+    expect(
+      shouldForwardBridgeEventToWechat("claude", "notice", {
+        text: "regular status notice",
+      })
+    ).toBe(true);
     expect(shouldForwardBridgeEventToWechat("shell", "stderr")).toBe(true);
   });
 

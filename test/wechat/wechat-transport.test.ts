@@ -20,7 +20,7 @@ describe("wechat upload limits", () => {
     expect(resolveMediaUploadLimitBytes("image", {})).toBe(20 * 1024 * 1024);
     expect(resolveMediaUploadLimitBytes("file", {})).toBe(50 * 1024 * 1024);
     expect(resolveMediaUploadLimitBytes("voice", {})).toBe(20 * 1024 * 1024);
-    expect(resolveMediaUploadLimitBytes("video", {})).toBe(100 * 1024 * 1024);
+    expect(resolveMediaUploadLimitBytes("video", {})).toBe(300 * 1024 * 1024);
   });
 
   test("allows env overrides and ignores invalid values", () => {
@@ -34,7 +34,7 @@ describe("wechat upload limits", () => {
       resolveMediaUploadLimitBytes("video", {
         WECHAT_MAX_VIDEO_MB: "not-a-number",
       } as NodeJS.ProcessEnv)
-    ).toBe(100 * 1024 * 1024);
+    ).toBe(300 * 1024 * 1024);
   });
 
   test("throws a clear error when a file exceeds the configured limit", () => {
@@ -45,7 +45,7 @@ describe("wechat upload limits", () => {
         {} as NodeJS.ProcessEnv
       )
     ).toThrow(
-      "Video too large: 360 MB exceeds 100 MB limit. Set WECHAT_MAX_VIDEO_MB to override."
+      "Video too large: 360 MB exceeds 300 MB limit. Set WECHAT_MAX_VIDEO_MB to override."
     );
   });
 

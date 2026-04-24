@@ -60,6 +60,8 @@
 - Replaced the temporary Codex companion auto-recovery behavior with the real fix: the Docker manager now auto-starts the default Codex tmux companion, and `/model codex` on a persistent bridge starts or reuses the `wechat-codex` tmux companion session before reporting the switch as successful.
 - Suppressed Gemini/Copilot ACP tool progress notices such as `gemini tool:` and `gemini tool update:` from WeChat replies while keeping them in bridge logs.
 - Fixed exfat/non-symlink shared skill refresh so `.linkai/skills` is authoritative on startup and stale real provider skill directories are overwritten with the current shared skill files.
+- Added WeChat typing keepalive for active bridge turns so long-running tasks refresh the top-of-chat sending indicator every 5 seconds instead of sending a visible progress notice message.
+- Raised the default WeChat video upload limit from 100MB to 300MB and aligned the shared `video-download` skill/docs so files under 300MB are sent without size-only downscaling.
 
 ## In Progress
 
