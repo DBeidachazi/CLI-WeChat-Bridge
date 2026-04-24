@@ -186,17 +186,66 @@ fi
 
 ensure_executable_bits
 
+cli_command_for_adapter() {
+  case "${1}" in
+    CODEX) printf 'codex' ;;
+    GEMINI) printf 'gemini' ;;
+    COPILOT) printf 'copilot' ;;
+    CLAUDE) printf 'claude' ;;
+    OPENCODE) printf 'opencode' ;;
+    *) return 1 ;;
+  esac
+}
+
+should_run_cli_install() {
+  local adapter="${1}"
+  local command_name
+  local policy="${WECHAT_BRIDGE_CLI_INSTALL_POLICY:-missing}"
+
+  if [[ "${WECHAT_BRIDGE_FORCE_UPDATE_CLIS:-false}" == "true" ]]; then
+    return 0
+  fi
+
+  if [[ "${policy}" == "always" ]]; then
+    return 0
+  fi
+
+  command_name="$(cli_command_for_adapter "${adapter}")"
+  if command -v "${command_name}" >/dev/null 2>&1; then
+    echo "[bootstrap] ${adapter,,} already installed at $(command -v "${command_name}"); skipping"
+    return 1
+  fi
+
+  return 0
+}
+
 if [[ "${WECHAT_BRIDGE_AUTO_INSTALL_CLIS:-true}" == "true" ]]; then
   for adapter in CODEX GEMINI COPILOT CLAUDE OPENCODE; do
     install_var="WECHAT_BRIDGE_INSTALL_${adapter}"
     install_cmd="${!install_var:-}"
     if [[ -n "${install_cmd}" ]]; then
-      echo "[bootstrap] installing/updating ${adapter,,}..."
-      bash -lc "${install_cmd}"
+      if should_run_cli_install "${adapter}"; then
+        echo "[bootstrap] installing/updating ${adapter,,}..."
+        bash -lc "${install_cmd}"
+      fi
     fi
   done
 fi
 
-npm install -g .
+global_install_hash_file="node_modules/.global-install.sha256"
+current_global_install_hash="$(
+  {
+    sha256sum package.json package-lock.json bun.lock tsconfig.json
+    find bin src scripts .linkai -type f -print0 | sort -z | xargs -0 sha256sum
+  } | sha256sum | awk '{print $1}'
+)"
+
+if [[ ! -f "${global_install_hash_file}" ]] || [[ "$(cat "${global_install_hash_file}")" != "${current_global_install_hash}" ]]; then
+  echo "[bootstrap] installing local bridge commands globally..."
+  npm install -g .
+  printf '%s\n' "${current_global_install_hash}" > "${global_install_hash_file}"
+else
+  echo "[bootstrap] local bridge commands are already current; skipping global install"
+fi
 ensure_executable_bits
 sync_shared_ai_overlay

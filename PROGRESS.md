@@ -21,6 +21,7 @@
 - Switched update checks from rolling 24h cache to a local 5:00 daily window.
 - Added Docker packaging with `imbios/bun-node`, `docker-compose.yml`, `tmux`, `unless-stopped`, `openclaw-net`, `user: "0:0"`, and `./home:/root`.
 - Added runtime bootstrap scripts to auto-install/update Codex, Gemini, Copilot, Claude, and OpenCode inside the container and reinstall the local package globally.
+- Changed runtime CLI bootstrap to default to missing-only installs, with `WECHAT_BRIDGE_CLI_INSTALL_POLICY=always` or `WECHAT_BRIDGE_FORCE_UPDATE_CLIS=true` available for forced CLI refreshes.
 - Fixed container runtime dependency handling for native modules by adding build tooling and startup-time dependency hashing/rebuild logic for `node-pty`.
 - Added container auto-setup for WeChat credentials: when `account.json` is missing, startup now runs `bun run setup` and emits the QR code to container logs instead of failing immediately.
 - Added transcript logging to bridge stdout/stderr so the WeChat <-> CLI text flow is visible in `docker logs`.

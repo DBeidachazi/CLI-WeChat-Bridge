@@ -19,7 +19,7 @@
 
 现在容器启动链路已经做了这些事情：
 
-- 自动安装/更新 `codex`、`gemini`、`copilot`、`claude`、`opencode`
+- 自动安装缺失的 `codex`、`gemini`、`copilot`、`claude`、`opencode`
 - 自动检查并修复本项目可执行文件的 `+x`
 - 缺少微信凭据时自动执行 `bun run setup`
 - 把微信登录二维码直接打印到 `docker logs`
@@ -344,10 +344,14 @@ WECHAT_BRIDGE_SPAWN_COPILOT=copilot --acp --stdio
 WECHAT_BRIDGE_ACP_AUTO_APPROVE=true
 
 WECHAT_BRIDGE_AUTO_INSTALL_CLIS=true
+WECHAT_BRIDGE_CLI_INSTALL_POLICY=missing
+#WECHAT_BRIDGE_FORCE_UPDATE_CLIS=true
 WECHAT_BRIDGE_AUTO_WECHAT_SETUP=true
 WECHAT_BRIDGE_LOG_TRANSCRIPT=true
 WECHAT_BRIDGE_BACKGROUND_LOG_TO_CONTAINER=true
 ```
+
+`WECHAT_BRIDGE_CLI_INSTALL_POLICY=missing` 表示容器启动时只安装缺失的 CLI，已存在的 `codex/gemini/copilot/claude/opencode` 会跳过，避免每次重启都重新 `npm install -g`。需要强制刷新 CLI 时，把策略改成 `always`，或者临时打开 `WECHAT_BRIDGE_FORCE_UPDATE_CLIS=true`。
 
 ## 常见问题
 
