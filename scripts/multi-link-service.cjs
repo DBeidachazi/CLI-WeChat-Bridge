@@ -169,7 +169,7 @@ function walkFiles(rootPath, relativePrefix = "") {
     const relativePath = relativePrefix
       ? path.join(relativePrefix, entry.name)
       : entry.name;
-    const absolutePath = path.join(rootPath, relativePath);
+    const absolutePath = path.join(rootPath, entry.name);
     if (entry.isDirectory()) {
       files.push(...walkFiles(absolutePath, relativePath));
       continue;
@@ -187,16 +187,12 @@ function seedInitialState() {
   }
 
   const skillsRoots = buildSkillsRoots();
-  const relativeFiles = new Set();
-  for (const root of skillsRoots) {
-    for (const relativeFile of walkFiles(root)) {
-      relativeFiles.add(relativeFile);
-    }
-  }
+  const sharedSkillsRoot = skillsRoots[0];
+  const relativeFiles = new Set(walkFiles(sharedSkillsRoot));
 
   for (const relativeFile of relativeFiles) {
     const group = skillsRoots.map((root) => path.join(root, relativeFile));
-    seedMissingFilesInGroup(group);
+    copyIntoGroup(path.join(sharedSkillsRoot, relativeFile), group);
   }
 }
 

@@ -307,7 +307,7 @@ Docker 容器启动后，同一套链接会同步到：
 - `/root/.gemini`
 - `/root/.copilot`
 
-同步只会补共享文档和 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。
+同步只管理共享文档和 `.linkai/skills` 投影出来的 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。对于 shared skills，`.linkai/skills` 是权威来源；如果 `/root/.gemini/skills/video-download` 这类目标已经是旧的实体目录，启动同步会用 `.linkai/skills/video-download` 刷新它，避免 Docker 镜像更新后 provider 目录还停在旧脚本。
 
 如果你在服务器上使用已经发布到 Docker Hub 的镜像，执行：
 
@@ -318,7 +318,7 @@ docker compose up -d
 
 容器重建后会带上镜像里的最新 `.linkai/skills`。启动脚本会再次同步 shared skills 到 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot`；如果宿主文件系统不支持 symlink，multi-link 同步服务也会继续把新的 skill 文件复制/同步过去。
 
-如果容器的 `/root` 挂载在不支持符号链接的文件系统上，例如 `exfat`，启动时会自动拉起 `scripts/multi-link-service.cjs`。这个基于 `chokidar` 的常驻同步服务会持续把 `.linkai` 与 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot` 之间的共享文档和 `skills` 做多向同步，用文件同步来模拟 link 效果，而不是一次性复制后就失联。
+如果容器的 `/root` 挂载在不支持符号链接的文件系统上，例如 `exfat`，目标目录保持为真实文件/文件夹是正常 fallback。启动时会自动拉起 `scripts/multi-link-service.cjs`，这个基于 `chokidar` 的常驻同步服务会持续把 `.linkai` 与 `/root/.claude`、`/root/.codex`、`/root/.gemini`、`/root/.copilot` 之间的共享文档和 `skills` 做多向同步，用文件同步来模拟 link 效果，而不是一次性复制后就失联。
 
 `/app` 在容器里只是 CLI-WeChat-Bridge 程序源码目录，不是给 AI 日常工作的上下文目录。除非你正在调试 bridge 程序本身，否则不要让内层 CLI 扫描 `/app` 下的源码；日常对话、记忆、skills、登录态和临时工作文件都应放在家目录 `/root`。
 

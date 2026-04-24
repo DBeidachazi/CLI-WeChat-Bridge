@@ -48,8 +48,10 @@ sync_shared_ai_overlay() {
         return 0
       fi
       rm -f "${dest_path}" 2>/dev/null || true
+    elif [[ -d "${source_path}" && -d "${dest_path}" ]]; then
+      rm -rf "${dest_path}" 2>/dev/null || true
     elif [[ -e "${dest_path}" ]]; then
-      return 0
+      rm -rf "${dest_path}" 2>/dev/null || true
     fi
 
     if ln -s "${source_path}" "${dest_path}" 2>/dev/null; then
