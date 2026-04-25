@@ -32,16 +32,16 @@ import {
 
 type LocalCompanionLaunchAdapter = Exclude<BridgeAdapterKind, "shell">;
 
-type LocalCompanionStartCliOptions = {
+interface LocalCompanionStartCliOptions {
   adapter: LocalCompanionLaunchAdapter;
   cwd: string;
   profile?: string;
   timeoutMs: number;
-};
+}
 
-type EndpointReadResult = {
+interface EndpointReadResult {
   endpoint: LocalCompanionEndpoint | null;
-};
+}
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_WAIT_TIMEOUT_MS = 15_000;

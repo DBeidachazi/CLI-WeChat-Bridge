@@ -267,7 +267,7 @@ describe("OpenCode SSE event dispatch", () => {
       command: "opencode",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -348,7 +348,7 @@ describe("OpenCode visible TUI session sync", () => {
       renderMode: "companion",
       initialSharedSessionId: "session_restore",
     });
-    const selectSessionCalls: Array<Record<string, unknown>> = [];
+    const selectSessionCalls: Record<string, unknown>[] = [];
     const internal = adapter as unknown as {
       client: {
         session: {
@@ -491,7 +491,7 @@ describe("OpenCode visible TUI session sync", () => {
       renderMode: "companion",
     });
     const events: Array<{ type: string; sessionId?: string }> = [];
-    const selectSessionCalls: Array<Record<string, unknown>> = [];
+    const selectSessionCalls: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as { type: string; sessionId?: string });
     });
@@ -559,7 +559,7 @@ describe("OpenCode session.idle handling", () => {
       command: "opencode",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -616,7 +616,7 @@ describe("OpenCode session.idle handling", () => {
     const finalReplyEvents = events.filter((e) => e.type === "final_reply");
 
     expect(statusEvents.length).toBeGreaterThanOrEqual(1);
-    expect(statusEvents[statusEvents.length - 1]?.status).toBe("idle");
+    expect(statusEvents.at(-1)?.status).toBe("idle");
     expect(finalReplyEvents).toHaveLength(1);
     expect(finalReplyEvents[0]?.text).toBe("Final visible answer");
     expect(taskCompleteEvents).toHaveLength(1);
@@ -655,7 +655,7 @@ describe("OpenCode session.idle handling", () => {
   });
 
   test("clears pending permission after session idle", async () => {
-    const { events, internal } = createBusyAdapter();
+    const { internal } = createBusyAdapter();
     internal.state.status = "awaiting_approval";
     internal.pendingPermission = { code: "TESTCODE" };
 
@@ -946,7 +946,7 @@ describe("OpenCode permission.updated handling", () => {
       command: "opencode",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });

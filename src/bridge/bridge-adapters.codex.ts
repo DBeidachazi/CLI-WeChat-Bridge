@@ -36,17 +36,16 @@ type CodexThreadAnnouncementSignal =
   | "session_fallback"
   | "turn_started"
   | "user_message";
-type CodexPendingThreadAnnouncement = {
-  threadId: string;
-  source: BridgeThreadSwitchSource;
+interface CodexPendingThreadAnnouncement {
   reason: BridgeThreadSwitchReason;
   signals: Set<CodexThreadAnnouncementSignal>;
+  source: BridgeThreadSwitchSource;
+  threadId: string;
   timer: ReturnType<typeof setTimeout> | null;
-};
+}
 
 const {
   CODEX_APP_SERVER_HOST,
-  CODEX_APP_SERVER_LOG_LIMIT,
   CODEX_APP_SERVER_READY_TIMEOUT_MS,
   CODEX_FINAL_REPLY_SETTLE_DELAY_MS,
   CODEX_RECENT_SESSION_KEY_LIMIT,
@@ -59,7 +58,6 @@ const {
   CODEX_THREAD_SIGNAL_TTL_MS,
   INTERRUPT_SETTLE_DELAY_MS,
   appendBoundedLog,
-  buildCliEnvironment,
   buildCodexApprovalRequest,
   buildCodexCliArgs,
   coerceWebSocketMessageData,
@@ -102,14 +100,17 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private rpcReconnectPromise: Promise<boolean> | null = null;
   private cleanPanelExitInProgress = false;
   private rpcRequestCounter = 0;
-  private pendingRpcRequests = new Map<string, CodexRpcPendingRequest>();
+  private readonly pendingRpcRequests = new Map<
+    string,
+    CodexRpcPendingRequest
+  >();
   private sharedThreadId: string | null = null;
   private announcedThreadId: string | null = null;
   private pendingThreadAnnouncement: CodexPendingThreadAnnouncement | null =
     null;
   private activeTurn: CodexActiveTurn | null = null;
-  private bridgeOwnedTurnIds = new Set<string>();
-  private recentBridgeThreadSignalAtById = new Map<string, number>();
+  private readonly bridgeOwnedTurnIds = new Set<string>();
+  private readonly recentBridgeThreadSignalAtById = new Map<string, number>();
   private pendingTurnStart = false;
   private pendingTurnThreadId: string | null = null;
   private interruptPendingTurnStart = false;
@@ -121,11 +122,11 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
     method: CodexPendingApprovalRequest["method"];
     params: Record<string, unknown>;
   }> = [];
-  private mirroredUserInputTurnIds = new Set<string>();
-  private turnFinalMessages = new Map<string, Map<string, string>>();
-  private turnDeltaByItem = new Map<string, Map<string, string>>();
-  private turnErrorById = new Map<string, string>();
-  private turnLastActivityAtMs = new Map<string, number>();
+  private readonly mirroredUserInputTurnIds = new Set<string>();
+  private readonly turnFinalMessages = new Map<string, Map<string, string>>();
+  private readonly turnDeltaByItem = new Map<string, Map<string, string>>();
+  private readonly turnErrorById = new Map<string, string>();
+  private readonly turnLastActivityAtMs = new Map<string, number>();
   private startupBlocker: string | null = null;
   private warmupUntilMs = 0;
   private sessionFilePath: string | null = null;
@@ -135,7 +136,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
   private sessionFinalText: string | null = null;
   private sessionIgnoreBeforeMs: number | null = null;
   private nextSessionFallbackScanAtMs = 0;
-  private completedTurnIds = new Set<string>();
+  private readonly completedTurnIds = new Set<string>();
   private completedTurnOrder: string[] = [];
   private pendingInjectedInputs: Array<{
     text: string;
@@ -2494,7 +2495,7 @@ export class CodexPtyAdapter extends AbstractPtyAdapter {
       return null;
     }
 
-    return deltaFallback[deltaFallback.length - 1] ?? null;
+    return deltaFallback.at(-1) ?? null;
   }
 
   private recordTurnActivity(

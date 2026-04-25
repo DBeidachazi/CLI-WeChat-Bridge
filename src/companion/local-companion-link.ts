@@ -30,24 +30,24 @@ export type LocalCompanionCloseReason =
   | "signal"
   | "worker_exit";
 
-export type LocalCompanionEndpoint = {
+export interface LocalCompanionEndpoint {
+  bridgeOwnerPid?: number;
+  command: string;
+  cwd: string;
   instanceId: string;
   kind: BridgeAdapterKind;
   port: number;
-  token: string;
+  profile?: string;
   renderMode?: "embedded" | "panel" | "companion";
-  bridgeOwnerPid?: number;
+  resumeConversationId?: string;
   serverPort?: number;
   serverUrl?: string;
-  cwd: string;
-  command: string;
-  profile?: string;
   sharedSessionId?: string;
   sharedThreadId?: string;
-  resumeConversationId?: string;
-  transcriptPath?: string;
   startedAt: string;
-};
+  token: string;
+  transcriptPath?: string;
+}
 
 export type LocalCompanionMessage =
   | {

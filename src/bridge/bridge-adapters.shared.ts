@@ -19,87 +19,87 @@ import type {
 } from "./bridge-types.ts";
 import { normalizeOutput, truncatePreview } from "./bridge-utils.ts";
 
-export type AdapterOptions = {
-  kind: BridgeAdapterKind;
+export interface AdapterOptions {
   command: string;
   cwd: string;
-  profile?: string;
-  lifecycle?: BridgeLifecycleMode;
+  initialResumeConversationId?: string;
   initialSharedSessionId?: string;
   initialSharedThreadId?: string;
-  initialResumeConversationId?: string;
   initialTranscriptPath?: string;
+  kind: BridgeAdapterKind;
+  lifecycle?: BridgeLifecycleMode;
+  profile?: string;
   renderMode?: "embedded" | "panel" | "companion";
-};
+}
 
 export type EventSink = (event: BridgeEvent) => void;
 
-export type SpawnTarget = {
-  file: string;
+export interface SpawnTarget {
   args: string[];
-};
+  file: string;
+}
 
-export type ResolveSpawnTargetOptions = {
+export interface ResolveSpawnTargetOptions {
   env?: Record<string, string | undefined>;
-  platform?: NodeJS.Platform;
   forwardArgs?: string[];
-};
+  platform?: NodeJS.Platform;
+}
 
 export type CodexRpcRequestId = string | number;
 
-export type CodexRpcPendingRequest = {
+export interface CodexRpcPendingRequest {
   method: string;
-  resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
-};
+  resolve: (value: unknown) => void;
+}
 
-export type CodexQueuedNotification = {
+export interface CodexQueuedNotification {
   method: string;
   params: Record<string, unknown>;
-};
+}
 
-export type CodexPendingApprovalRequest = {
-  requestId: CodexRpcRequestId;
+export interface CodexPendingApprovalRequest {
   method:
     | "item/commandExecution/requestApproval"
     | "item/fileChange/requestApproval";
+  origin: BridgeTurnOrigin;
+  requestId: CodexRpcRequestId;
   threadId: string;
   turnId: string;
-  origin: BridgeTurnOrigin;
-};
+}
 
-export type CodexActiveTurn = {
+export interface CodexActiveTurn {
+  origin: BridgeTurnOrigin;
   threadId: string;
   turnId: string;
-  origin: BridgeTurnOrigin;
-};
+}
 
-export type CodexSessionMeta = {
-  id?: string;
-  timestamp?: string;
+export interface CodexSessionMeta {
   cwd?: string;
-  source?: string | { custom?: string };
+  id?: string;
   originator?: string;
-};
+  source?: string | { custom?: string };
+  timestamp?: string;
+}
 
-export type CodexSessionSummary = {
-  threadId: string;
-  title: string;
+export interface CodexSessionSummary {
+  filePath: string;
   lastUpdatedAt: string;
   source?: string;
-  filePath: string;
-};
-
-export type CodexRecentSessionFile = {
   threadId: string;
+  title: string;
+}
+
+export interface CodexRecentSessionFile {
   filePath: string;
   modifiedAtMs: number;
-};
+  threadId: string;
+}
 
-export type ClaudePendingHookApproval = {
+export interface ClaudePendingHookApproval {
   requestId: string;
   socket: net.Socket;
-};
+}
 
 export const DEFAULT_COLS = 120;
 export const DEFAULT_ROWS = 30;
@@ -145,10 +145,10 @@ export const OPENCODE_WECHAT_WORKING_NOTICE_DELAY_MS = 12_000;
 
 export type ShellRuntimeFamily = "powershell" | "posix";
 
-export type ShellRuntime = {
+export interface ShellRuntime {
   family: ShellRuntimeFamily;
   launchArgs: string[];
-};
+}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1613,7 +1613,7 @@ export function resolveSpawnTarget(
   }
 
   if (extension === WINDOWS_POWERSHELL_EXTENSION) {
-    const siblingCmd = resolved.slice(0, -extension.length) + ".cmd";
+    const siblingCmd = `${resolved.slice(0, -extension.length)}.cmd`;
     if (fileExists(siblingCmd)) {
       return wrapWithCmdExe(siblingCmd, forwardArgs, env);
     }

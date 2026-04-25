@@ -20,10 +20,10 @@ function log(adapter: string, message: string): void {
   process.stderr.write(`[${adapter}-companion] ${message}\n`);
 }
 
-type LocalCompanionCliOptions = {
+interface LocalCompanionCliOptions {
   adapter: "codex" | "claude" | "opencode" | "gemini" | "copilot";
   cwd: string;
-};
+}
 
 function parseCliArgs(argv: string[]): LocalCompanionCliOptions {
   let adapter: LocalCompanionCliOptions["adapter"] | null = null;

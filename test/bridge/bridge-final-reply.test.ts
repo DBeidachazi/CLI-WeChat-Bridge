@@ -102,10 +102,7 @@ describe("forwardWechatFinalReply", () => {
 
     await forwardWechatFinalReply({
       adapter: "codex",
-      rawText: [
-        `Saved note to \`${filePath}\`.`,
-        "Review it.",
-      ].join("\n"),
+      rawText: [`Saved note to \`${filePath}\`.`, "Review it."].join("\n"),
       sender: {
         sendText: async (text) => {
           calls.push(`text:${text}`);
@@ -125,9 +122,7 @@ describe("forwardWechatFinalReply", () => {
       },
     });
 
-    expect(calls).toEqual([
-      `text:Saved note to \`${filePath}\`.\nReview it.`,
-    ]);
+    expect(calls).toEqual([`text:Saved note to \`${filePath}\`.\nReview it.`]);
   });
 
   test("keeps source code paths in text instead of auto-sending them as files", async () => {
@@ -217,11 +212,9 @@ describe("forwardWechatFinalReply", () => {
 
     await forwardWechatFinalReply({
       adapter: "codex",
-      rawText: [
-        "```wechat-attachments",
-        `video ${videoPath}`,
-        "```",
-      ].join("\n"),
+      rawText: ["```wechat-attachments", `video ${videoPath}`, "```"].join(
+        "\n"
+      ),
       sender: {
         sendText: async () => undefined,
         sendImage: async () => undefined,
@@ -247,11 +240,9 @@ describe("forwardWechatFinalReply", () => {
 
     await forwardWechatFinalReply({
       adapter: "codex",
-      rawText: [
-        "```wechat-attachments",
-        `video ${videoPath}`,
-        "```",
-      ].join("\n"),
+      rawText: ["```wechat-attachments", `video ${videoPath}`, "```"].join(
+        "\n"
+      ),
       sender: {
         sendText: async () => undefined,
         sendImage: async () => undefined,

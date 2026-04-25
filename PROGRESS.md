@@ -68,6 +68,7 @@
 - Cleaning up remaining TypeScript/test drift that already existed in the repo alongside the new ACP changes.
 - Tightening the shared-skill workflow so project guidance stays synchronized between `AGENT.md`, `PROGRESS.md`, and the generated shared WeChat bridge skill.
 - Initializing Ultracite so future repository hygiene is driven by a single shared toolchain instead of ad hoc line-ending enforcement.
+- Cleaning up Biome warnings with a mix of targeted code fixes and repo-specific Biome tuning so `biome check .` no longer fails on unsupported files or high-noise rules that do not fit this bridge-heavy codebase.
 - End-to-end runtime verification on the target iStoreOS host after CI completes:
   - confirm inbound WeChat images reach Gemini/Copilot on the first turn without `Provided image is not valid`
   - confirm a bad outbound Gemini image candidate no longer poisons later text-only turns

@@ -9,49 +9,49 @@ export type ClaudeHookEventName =
   | "Stop"
   | "StopFailure";
 
-export type ClaudeHookPayload = {
-  session_id?: string;
-  transcript_path?: string;
+export interface ClaudeHookPayload {
   cwd?: string;
-  hook_event_name?: ClaudeHookEventName | string;
-  source?: string;
-  prompt?: string;
-  permission_mode?: string;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  permission_suggestions?: unknown[];
-  notification_type?: string;
-  message?: string;
-  title?: string;
-  last_assistant_message?: string;
   error?: string;
   error_details?: string;
+  hook_event_name?: ClaudeHookEventName | string;
+  last_assistant_message?: string;
+  message?: string;
+  notification_type?: string;
+  permission_mode?: string;
+  permission_suggestions?: unknown[];
+  prompt?: string;
+  session_id?: string;
+  source?: string;
   stop_hook_active?: boolean;
-};
+  title?: string;
+  tool_input?: Record<string, unknown>;
+  tool_name?: string;
+  transcript_path?: string;
+}
 
-export type PendingInjectedClaudePrompt = {
-  normalizedText: string;
+export interface PendingInjectedClaudePrompt {
   createdAtMs: number;
-};
+  normalizedText: string;
+}
 
 export type ClaudePermissionDecisionAction = "confirm" | "deny";
 
-type ClaudeTranscriptAssistantEntry = {
-  type?: string;
+interface ClaudeTranscriptAssistantEntry {
   message?: {
     role?: string;
     content?: unknown;
     stop_reason?: string | null;
   };
-};
+  type?: string;
+}
 
-type ClaudeHookScriptParams = {
-  platform?: NodeJS.Platform;
-  runtimeExecPath: string;
+interface ClaudeHookScriptParams {
   hookEntryPath: string;
   hookPort: number;
   hookToken: string;
-};
+  platform?: NodeJS.Platform;
+  runtimeExecPath: string;
+}
 
 function quoteWindowsCommandArg(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -88,7 +88,7 @@ export function extractClaudeResumeConversationId(
   }
 
   const segments = trimmed.split(/[\\/]+/);
-  const fileName = segments[segments.length - 1] ?? "";
+  const fileName = segments.at(-1) ?? "";
   if (!fileName.toLowerCase().endsWith(".jsonl")) {
     return null;
   }

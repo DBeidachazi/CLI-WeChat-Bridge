@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
 
-export type BridgeProcessRecord = {
-  pid: number;
-  parentPid?: number;
-  name?: string;
+export interface BridgeProcessRecord {
   commandLine: string;
-};
+  name?: string;
+  parentPid?: number;
+  pid: number;
+}
 
 const PEER_BRIDGE_EXIT_TIMEOUT_MS = 4000;
 const PEER_BRIDGE_EXIT_POLL_MS = 100;

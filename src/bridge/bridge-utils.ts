@@ -143,31 +143,31 @@ const ACP_PROMPT_INLINE_MEDIA_KINDS = new Set(["image", "voice"]);
 
 export type WechatAttachmentKind = (typeof WECHAT_ATTACHMENT_KINDS)[number];
 
-export type WechatReplyAttachment = {
+export interface WechatReplyAttachment {
   kind: WechatAttachmentKind;
   path: string;
-};
+}
 
-export type ParsedWechatFinalReply = {
-  visibleText: string;
+export interface ParsedWechatFinalReply {
   attachments: WechatReplyAttachment[];
-};
+  visibleText: string;
+}
 
-type CodexSessionJsonLine = {
-  timestamp?: string;
-  type?: string;
+interface CodexSessionJsonLine {
   payload?: {
     type?: string;
     phase?: string;
     message?: string;
   };
-};
-
-export type CodexSessionAgentMessage = {
   timestamp?: string;
-  phase?: string;
+  type?: string;
+}
+
+export interface CodexSessionAgentMessage {
   message: string;
-};
+  phase?: string;
+  timestamp?: string;
+}
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -1162,11 +1162,9 @@ export function sanitizeWechatFinalReplyText(
       continue;
     }
 
-    const previousLine =
-      keptLines.length > 0 ? keptLines[keptLines.length - 1] : undefined;
+    const previousLine = keptLines.length > 0 ? keptLines.at(-1) : undefined;
     if (
-      previousLine &&
-      previousLine.trim() &&
+      previousLine?.trim() &&
       previousLine.trim().replace(/\s+/g, " ") === line.replace(/\s+/g, " ")
     ) {
       continue;
@@ -1243,6 +1241,10 @@ function resolveWechatAttachmentPath(candidatePath: string): string | null {
   const normalizedCandidate = normalizeWechatAttachmentCandidate(candidatePath);
   if (!normalizedCandidate) {
     return null;
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(normalizedCandidate)) {
+    return path.win32.normalize(normalizedCandidate);
   }
 
   if (path.isAbsolute(normalizedCandidate)) {

@@ -24,47 +24,47 @@ const SERVER_VERSION = "0.3.0";
 const DEFAULT_POLL_TIMEOUT_MS = 1000;
 const MAX_POLL_TIMEOUT_MS = 35_000;
 
-type FetchMessagesArgs = {
-  waitForNew: boolean;
+interface FetchMessagesArgs {
   timeoutMs: number;
-};
+  waitForNew: boolean;
+}
 
-type ReplyArgs = {
+interface ReplyArgs {
   senderId: string;
   text: string;
-};
+}
 
-type NotifyArgs = {
+interface NotifyArgs {
   message: string;
   recipientId?: string;
-};
+}
 
-type SendImageArgs = {
-  imagePath: string;
+interface SendImageArgs {
   caption?: string;
+  imagePath: string;
   recipientId?: string;
-};
+}
 
-type SendFileArgs = {
+interface SendFileArgs {
   filePath: string;
-  title?: string;
   recipientId?: string;
-};
+  title?: string;
+}
 
-type SendVoiceArgs = {
+interface SendVoiceArgs {
+  recipientId?: string;
   voicePath: string;
-  recipientId?: string;
-};
+}
 
-type SendVideoArgs = {
-  videoPath: string;
+interface SendVideoArgs {
+  recipientId?: string;
   title?: string;
-  recipientId?: string;
-};
+  videoPath: string;
+}
 
-type ResetSyncArgs = {
+interface ResetSyncArgs {
   clearContextCache: boolean;
-};
+}
 
 function log(message: string): void {
   process.stderr.write(`[wechat-mcp] ${message}\n`);

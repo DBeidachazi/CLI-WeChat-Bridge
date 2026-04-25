@@ -22,16 +22,16 @@ export type CodexPanelCommand =
   | { command: "dispose" }
   | { command: "resolve_approval"; action: "confirm" | "deny" };
 
-export type CodexPanelEndpoint = {
+export interface CodexPanelEndpoint {
+  command: string;
+  cwd: string;
   instanceId: string;
   port: number;
-  token: string;
-  cwd: string;
-  command: string;
   profile?: string;
   sharedThreadId?: string;
   startedAt: string;
-};
+  token: string;
+}
 
 export type CodexPanelMessage =
   | {

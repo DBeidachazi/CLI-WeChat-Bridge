@@ -72,7 +72,7 @@ export async function fetchLatestVersion(): Promise<string | null> {
     // 按版本号排序，返回最新的
     versionTags.sort((a, b) => compareVersions(b, a));
     return versionTags[0] ?? null;
-  } catch (error) {
+  } catch {
     // 如果 git 命令失败，静默返回 null
     return null;
   }
@@ -93,7 +93,7 @@ export async function getCurrentVersion(): Promise<string> {
     const content = await fs.promises.readFile(packageJsonPath, "utf-8");
     const packageJson = JSON.parse(content);
     return packageJson.version || "0.0.0";
-  } catch (error) {
+  } catch {
     return "0.0.0";
   }
 }
@@ -109,7 +109,7 @@ function readUpdateCache(): UpdateCheckCache | null {
 
     const content = fs.readFileSync(UPDATE_CHECK_FILE, "utf-8");
     return JSON.parse(content) as UpdateCheckCache;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -121,7 +121,7 @@ function writeUpdateCache(cache: UpdateCheckCache): void {
   try {
     ensureChannelDataDir();
     fs.writeFileSync(UPDATE_CHECK_FILE, JSON.stringify(cache, null, 2));
-  } catch (error) {
+  } catch {
     // 静默失败，不影响正常使用
   }
 }

@@ -1,4 +1,50 @@
+// Repo-specific Biome tuning on top of Ultracite defaults.
+// Keeps unsupported files from failing `biome check .` and relaxes a few
+// high-noise rules that do not fit this bridge/runtime-heavy codebase well.
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": ["ultracite/biome/core"]
+  "extends": ["ultracite/biome/core"],
+  "files": {
+    "ignoreUnknown": true
+  },
+  "linter": {
+    "rules": {
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "off",
+        "noVoid": "off"
+      },
+      "correctness": {
+        "noUnusedPrivateClassMembers": "off"
+      },
+      "performance": {
+        "noBarrelFile": "off",
+        "noNamespaceImport": "off",
+        "useTopLevelRegex": "off"
+      },
+      "style": {
+        "noNestedTernary": "off",
+        "noNonNullAssertion": "off",
+        "useConsistentArrayType": "off",
+        "useConsistentTypeDefinitions": "off",
+        "useDefaultSwitchClause": "off",
+        "useReadonlyClassProperties": "off"
+      },
+      "suspicious": {
+        "noControlCharactersInRegex": "off",
+        "useAwait": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["test/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noEmptyBlockStatements": "off"
+          }
+        }
+      }
+    }
+  ]
 }

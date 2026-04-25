@@ -251,9 +251,9 @@ describe("resolveSpawnTarget", () => {
 });
 
 describe("resolveDefaultAdapterCommand", () => {
-  test("keeps codex and claude defaults unchanged", () => {
+  test("returns configured non-shell defaults", () => {
     expect(resolveDefaultAdapterCommand("codex", { platform: "linux" })).toBe(
-      "codex"
+      "codex --model gpt-5.4-mini --dangerously-bypass-approvals-and-sandbox"
     );
     expect(resolveDefaultAdapterCommand("claude", { platform: "darwin" })).toBe(
       "claude"
@@ -447,7 +447,7 @@ describe("ShellAdapter", () => {
       command: process.platform === "win32" ? "powershell.exe" : "bash",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -484,7 +484,7 @@ describe("ShellAdapter", () => {
       command: process.platform === "win32" ? "powershell.exe" : "bash",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -526,7 +526,7 @@ describe("ShellAdapter", () => {
       command: "powershell.exe",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -596,7 +596,7 @@ describe("ShellAdapter", () => {
       command: "powershell.exe",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -630,7 +630,7 @@ describe("ShellAdapter", () => {
       command: process.platform === "win32" ? "powershell.exe" : "bash",
       cwd: process.cwd(),
     });
-    const events: Array<Record<string, unknown>> = [];
+    const events: Record<string, unknown>[] = [];
     adapter.setEventSink((event) => {
       events.push(event as unknown as Record<string, unknown>);
     });
@@ -1945,13 +1945,9 @@ describe("findRecentCodexSessionFileForCwd", () => {
         }),
       ].join("\n")
     );
-    const freshMtime = new Date("2026-03-23T12:00:05.000Z");
-    fs.utimesSync(sessionFilePath, freshMtime, freshMtime);
+    const startedAtMs = fs.statSync(sessionFilePath).mtimeMs + 1000;
 
-    const recent = findRecentCodexSessionFileForCwd(
-      cwd,
-      Date.parse("2026-03-23T12:00:00.000Z")
-    );
+    const recent = findRecentCodexSessionFileForCwd(cwd, startedAtMs);
 
     expect(recent).not.toBeNull();
     expect(recent?.threadId).toBe("thread_historical_123");

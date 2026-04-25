@@ -250,7 +250,7 @@ describe("wechat-bridge cli helpers", () => {
     ).toBe(false);
     expect(
       shouldForwardBridgeEventToWechat("gemini", "notice", {
-        text: "gemini tool update: mkdir -p \"$HOME/meidia\" (completed)",
+        text: 'gemini tool update: mkdir -p "$HOME/meidia" (completed)',
       })
     ).toBe(false);
     expect(
