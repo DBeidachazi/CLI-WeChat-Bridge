@@ -66,23 +66,6 @@ type SdkSession = {
   share?: { url: string };
 };
 
-type SdkSessionStatus =
-  | { type: "idle" }
-  | { type: "busy" }
-  | { type: "retry"; attempt: number; message: string; next: number };
-
-type SdkPermission = {
-  id: string;
-  type: string;
-  pattern?: string | Array<string>;
-  sessionID: string;
-  messageID: string;
-  callID?: string;
-  title: string;
-  metadata: Record<string, unknown>;
-  time: { created: number };
-};
-
 type SdkPart = {
   id: string;
   sessionID: string;

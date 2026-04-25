@@ -46,11 +46,11 @@ export const INBOUND_MESSAGE_CLAIMS_DIR = path.join(
   "inbound-message-claims"
 );
 
-export type WorkspaceChannelPaths = {
-  workspaceDir: string;
-  stateFile: string;
+export interface WorkspaceChannelPaths {
   endpointFile: string;
-};
+  stateFile: string;
+  workspaceDir: string;
+}
 
 const LEGACY_CHANNEL_DATA_DIR = path.join(
   PROJECT_DIR,

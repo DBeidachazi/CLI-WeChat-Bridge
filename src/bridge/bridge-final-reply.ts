@@ -9,13 +9,13 @@ import {
   sanitizeWechatFinalReplyText,
 } from "./bridge-utils.ts";
 
-export type WechatFinalReplySender = {
-  sendText: (text: string) => Promise<void>;
-  sendImage: (imagePath: string) => Promise<unknown>;
+export interface WechatFinalReplySender {
   sendFile: (filePath: string) => Promise<unknown>;
-  sendVoice: (voicePath: string) => Promise<unknown>;
+  sendImage: (imagePath: string) => Promise<unknown>;
+  sendText: (text: string) => Promise<void>;
   sendVideo: (videoPath: string) => Promise<unknown>;
-};
+  sendVoice: (voicePath: string) => Promise<unknown>;
+}
 
 const AUTO_CLEANUP_MEDIA_DIR = path.join(os.homedir(), "meidia");
 

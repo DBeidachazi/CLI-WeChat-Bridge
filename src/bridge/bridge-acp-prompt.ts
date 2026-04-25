@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import type { BridgeInputAttachment, BridgeUserInput } from "./bridge-types.ts";
 
-export type AcpPromptCapabilities = {
-  image: boolean;
+export interface AcpPromptCapabilities {
   audio: boolean;
-};
+  image: boolean;
+}
 
 function isPromptInlineAttachmentSupported(
   attachment: BridgeInputAttachment,

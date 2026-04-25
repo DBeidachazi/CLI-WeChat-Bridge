@@ -14,26 +14,26 @@ import type {
 } from "./bridge-types.ts";
 import { buildInstanceId } from "./bridge-utils.ts";
 
-type BridgeStateOptions = {
+interface BridgeStateOptions {
   adapter: BridgeAdapterKind;
-  command: string;
-  cwd: string;
-  profile?: string;
-  lifecycle: BridgeLifecycleMode;
   authorizedUserId: string;
-};
+  command: string;
+  cwd: string;
+  lifecycle: BridgeLifecycleMode;
+  profile?: string;
+}
 
-export type BridgeLockPayload = {
-  pid: number;
-  parentPid: number;
-  instanceId: string;
+export interface BridgeLockPayload {
   adapter: BridgeAdapterKind;
   command: string;
   cwd: string;
-  startedAt: string;
-  lifecycle: BridgeLifecycleMode;
+  instanceId: string;
   legacyLifecycleFallback?: true;
-};
+  lifecycle: BridgeLifecycleMode;
+  parentPid: number;
+  pid: number;
+  startedAt: string;
+}
 
 export type BridgeRuntimeOwnership =
   | {
@@ -259,7 +259,7 @@ function tryTerminateOrphanedBridge(lock: BridgeLockPayload): boolean {
 }
 
 export class BridgeStateStore {
-  private state: BridgeState;
+  private readonly state: BridgeState;
   private readonly lockPayload: BridgeLockPayload;
   private readonly bridgeStartedAtMs: number;
   private readonly instanceId: string;

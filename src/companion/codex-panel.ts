@@ -16,9 +16,9 @@ function log(message: string): void {
   process.stderr.write(`[codex-panel] ${message}\n`);
 }
 
-type CodexPanelCliOptions = {
+interface CodexPanelCliOptions {
   cwd: string;
-};
+}
 
 function parseCliArgs(argv: string[]): CodexPanelCliOptions {
   let cwd = process.cwd();

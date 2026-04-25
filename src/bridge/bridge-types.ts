@@ -29,93 +29,93 @@ export type BridgeNoticeLevel = "info" | "warning";
 
 export type ApprovalSource = "shell" | "cli";
 
-export type ApprovalRequest = {
-  source: ApprovalSource;
-  summary: string;
+export interface ApprovalRequest {
   commandPreview: string;
-  toolName?: string;
+  confirmInput?: string;
+  denyInput?: string;
   detailLabel?: string;
   detailPreview?: string;
   requestId?: string;
-  confirmInput?: string;
-  denyInput?: string;
-};
+  source: ApprovalSource;
+  summary: string;
+  toolName?: string;
+}
 
 export type PendingApproval = ApprovalRequest & {
   code: string;
   createdAt: string;
 };
 
-export type BridgeResumeSessionCandidate = {
-  sessionId: string;
-  title: string;
+export interface BridgeResumeSessionCandidate {
   lastUpdatedAt: string;
+  sessionId: string;
   source?: string;
   threadId?: string;
-};
+  title: string;
+}
 
 export type BridgeResumeThreadCandidate = BridgeResumeSessionCandidate;
 
 export type BridgeInputAttachmentKind = "image" | "voice" | "file" | "video";
 
-export type BridgeInputAttachment = {
+export interface BridgeInputAttachment {
   kind: BridgeInputAttachmentKind;
-  path: string;
   mimeType?: string;
-  title?: string;
+  path: string;
   sizeBytes?: number;
-};
+  title?: string;
+}
 
-export type BridgeUserInput = {
-  text: string;
+export interface BridgeUserInput {
   attachments?: BridgeInputAttachment[];
-};
+  text: string;
+}
 
 export type BridgeAdapterInput = BridgeUserInput | string;
 
-export type BridgeState = {
-  instanceId: string;
+export interface BridgeState {
   adapter: BridgeAdapterKind;
-  command: string;
-  cwd: string;
-  profile?: string;
-  bridgeStartedAtMs: number;
   authorizedUserId: string;
-  ignoredBacklogCount: number;
-  sharedSessionId?: string;
-  sharedThreadId?: string;
-  resumeConversationId?: string;
-  transcriptPath?: string;
-  pendingConfirmation?: PendingApproval | null;
-  lastActivityAt?: string;
-};
-
-export type BridgeAdapterState = {
-  kind: BridgeAdapterKind;
-  status: BridgeWorkerStatus;
-  pid?: number;
-  cwd: string;
+  bridgeStartedAtMs: number;
   command: string;
+  cwd: string;
+  ignoredBacklogCount: number;
+  instanceId: string;
+  lastActivityAt?: string;
+  pendingConfirmation?: PendingApproval | null;
   profile?: string;
-  startedAt?: string;
-  lastInputAt?: string;
-  lastOutputAt?: string;
-  pendingApproval?: ApprovalRequest | null;
+  resumeConversationId?: string;
   sharedSessionId?: string;
   sharedThreadId?: string;
-  activeRuntimeSessionId?: string;
-  resumeConversationId?: string;
   transcriptPath?: string;
-  lastSessionSwitchAt?: string;
-  lastSessionSwitchSource?: BridgeSessionSwitchSource;
-  lastSessionSwitchReason?: BridgeSessionSwitchReason;
-  lastThreadSwitchAt?: string;
-  lastThreadSwitchSource?: BridgeThreadSwitchSource;
-  lastThreadSwitchReason?: BridgeThreadSwitchReason;
+}
+
+export interface BridgeAdapterState {
+  activeRuntimeSessionId?: string;
   activeTurnId?: string;
   activeTurnOrigin?: BridgeTurnOrigin;
+  command: string;
+  cwd: string;
+  kind: BridgeAdapterKind;
+  lastInputAt?: string;
+  lastOutputAt?: string;
+  lastSessionSwitchAt?: string;
+  lastSessionSwitchReason?: BridgeSessionSwitchReason;
+  lastSessionSwitchSource?: BridgeSessionSwitchSource;
+  lastThreadSwitchAt?: string;
+  lastThreadSwitchReason?: BridgeThreadSwitchReason;
+  lastThreadSwitchSource?: BridgeThreadSwitchSource;
+  pendingApproval?: ApprovalRequest | null;
   pendingApprovalOrigin?: BridgeTurnOrigin;
-};
+  pid?: number;
+  profile?: string;
+  resumeConversationId?: string;
+  sharedSessionId?: string;
+  sharedThreadId?: string;
+  startedAt?: string;
+  status: BridgeWorkerStatus;
+  transcriptPath?: string;
+}
 
 export type BridgeEvent =
   | {

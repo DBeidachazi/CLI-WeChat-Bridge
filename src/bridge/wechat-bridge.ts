@@ -33,9 +33,9 @@ import type {
   BridgeAdapterKind,
   BridgeEvent,
   BridgeInputAttachment,
-  BridgeUserInput,
   BridgeLifecycleMode,
   BridgeTurnOrigin,
+  BridgeUserInput,
   BridgeWorkerStatus,
   PendingApproval,
 } from "./bridge-types.ts";
@@ -58,29 +58,29 @@ import {
   truncatePreview,
 } from "./bridge-utils.ts";
 
-type BridgeCliOptions = {
+interface BridgeCliOptions {
   adapter: BridgeAdapterKind;
   command: string;
   cwd: string;
-  profile?: string;
   lifecycle: BridgeLifecycleMode;
-};
+  profile?: string;
+}
 
-type ActiveTask = {
-  startedAt: number;
+interface ActiveTask {
   inputPreview: string;
   recipientId: string;
-};
+  startedAt: number;
+}
 
 type WechatModelSwitchTarget = BridgeAdapterKind;
 
-type DeferredInboundMessage = {
+interface DeferredInboundMessage {
   message: InboundWechatMessage;
-};
+}
 
-type WechatAdapterInputOptions = {
+interface WechatAdapterInputOptions {
   passthroughSlashCommand?: boolean;
-};
+}
 
 type WechatSendContext =
   | "message"
@@ -520,7 +520,7 @@ async function main(): Promise<void> {
       if (versionInfo?.hasUpdate) {
         log(formatUpdateMessage(versionInfo));
       }
-    } catch (error) {
+    } catch {
       // 静默失败，不影响正常使用
     }
   }, 3000); // 延迟3秒，确保不影响启动

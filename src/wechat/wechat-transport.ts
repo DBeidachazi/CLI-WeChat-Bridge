@@ -42,13 +42,13 @@ const UPLOAD_MEDIA_TYPE_VIDEO = 2;
 const UPLOAD_MEDIA_TYPE_FILE = 3;
 const UPLOAD_MEDIA_TYPE_VOICE = 4;
 
-export type AccountData = {
-  token: string;
-  baseUrl: string;
+export interface AccountData {
   accountId: string;
-  userId?: string;
+  baseUrl: string;
   savedAt: string;
-};
+  token: string;
+  userId?: string;
+}
 
 type ContextTokenState = Record<string, string>;
 
@@ -125,77 +125,77 @@ interface GetUpdatesResp {
   ret?: number;
 }
 
-export type InboundWechatMessage = {
-  senderId: string;
-  sender: string;
-  sessionId: string;
-  text: string;
+export interface InboundWechatMessage {
   attachments: BridgeInputAttachment[];
   contextToken?: string;
   createdAt: string;
   createdAtMs?: number;
-};
+  sender: string;
+  senderId: string;
+  sessionId: string;
+  text: string;
+}
 
-type PollMessagesOptions = {
-  timeoutMs?: number;
+interface PollMessagesOptions {
   minCreatedAtMs?: number;
-};
+  timeoutMs?: number;
+}
 
-type PollMessagesResult = {
-  messages: InboundWechatMessage[];
+interface PollMessagesResult {
   ignoredBacklogCount: number;
-};
+  messages: InboundWechatMessage[];
+}
 
-type TransportLogger = {
+interface TransportLogger {
   log: (message: string) => void;
   logError: (message: string) => void;
-};
+}
 
-type ResetSyncOptions = {
+interface ResetSyncOptions {
   clearContextCache?: boolean;
-};
+}
 
-type SendImageOptions = {
-  recipientId?: string;
+interface SendImageOptions {
   caption?: string;
-};
+  recipientId?: string;
+}
 
-type SendFileOptions = {
+interface SendFileOptions {
   recipientId?: string;
   title?: string;
-};
+}
 
-type SendVideoOptions = {
+interface SendVideoOptions {
   recipientId?: string;
   title?: string;
-};
+}
 
 type UploadLabel = "image" | "file" | "voice" | "video";
 
-type ResolvedRecipient = {
+interface ResolvedRecipient {
   account: AccountData;
-  recipientId: string;
   contextToken: string;
-};
+  recipientId: string;
+}
 
-type UploadPreparation = {
-  rawsize: number;
-  filesize: number;
+interface UploadPreparation {
   aeskey: Buffer;
   downloadParam: string;
-};
+  filesize: number;
+  rawsize: number;
+}
 
 type InboundMediaDownloadKind = UploadLabel;
 
-type InboundMediaDownloadTarget = {
-  kind: InboundMediaDownloadKind;
-  title?: string;
-  sizeBytes?: number;
-  mimeType?: string;
-  media?: CDNMedia;
-  preferredAesKeyHex?: string;
+interface InboundMediaDownloadTarget {
   directUrl?: string;
-};
+  kind: InboundMediaDownloadKind;
+  media?: CDNMedia;
+  mimeType?: string;
+  preferredAesKeyHex?: string;
+  sizeBytes?: number;
+  title?: string;
+}
 
 export type WechatTransportErrorKind =
   | "timeout"
@@ -204,11 +204,11 @@ export type WechatTransportErrorKind =
   | "auth"
   | "unknown";
 
-export type WechatTransportErrorClassification = {
+export interface WechatTransportErrorClassification {
   kind: WechatTransportErrorKind;
   retryable: boolean;
   statusCode?: number;
-};
+}
 
 const DEFAULT_MEDIA_UPLOAD_LIMIT_MB: Record<UploadLabel, number> = {
   image: 20,
@@ -1379,9 +1379,7 @@ export class WeChatTransport {
         ilink_user_id: resolved.recipientId,
         typing_ticket: typingTicket,
         status:
-          status === "typing"
-            ? TYPING_STATUS_TYPING
-            : TYPING_STATUS_CANCEL,
+          status === "typing" ? TYPING_STATUS_TYPING : TYPING_STATUS_CANCEL,
         base_info: { channel_version: CHANNEL_VERSION },
       }),
       token: resolved.account.token,
@@ -1567,7 +1565,7 @@ export class WeChatTransport {
     let resolvedRecipientId = recipientId?.trim();
     if (!resolvedRecipientId) {
       const recipients = [...this.contextTokenCache.keys()];
-      resolvedRecipientId = recipients[recipients.length - 1];
+      resolvedRecipientId = recipients.at(-1);
       if (!resolvedRecipientId) {
         throw new Error(
           "No cached context token is available. Fetch messages first or ask the user to send a new WeChat message."

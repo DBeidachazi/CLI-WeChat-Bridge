@@ -30,13 +30,13 @@ interface QRStatusResponse {
   status: "wait" | "scaned" | "confirmed" | "expired";
 }
 
-type StoredAccount = {
-  token: string;
-  baseUrl: string;
+interface StoredAccount {
   accountId: string;
-  userId?: string;
+  baseUrl: string;
   savedAt: string;
-};
+  token: string;
+  userId?: string;
+}
 
 function loadExistingCredentials(): StoredAccount | null {
   try {

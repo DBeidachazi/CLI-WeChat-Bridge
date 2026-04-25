@@ -14,15 +14,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
+import type { MessageParam } from "@anthropic-ai/sdk/resources/messages/messages.js";
 
 // Types
-type AccountData = {
-  token: string;
-  baseUrl: string;
+interface AccountData {
   accountId: string;
-  userId?: string;
+  baseUrl: string;
   savedAt: string;
-};
+  token: string;
+  userId?: string;
+}
 
 interface TextItem {
   text?: string;
@@ -65,8 +66,8 @@ interface GetUpdatesResp {
 const HOME_DIR = os.homedir();
 const CREDENTIALS_FILE = `${HOME_DIR}/.claude/channels/wechat/account.json`;
 const SYNC_BUF_FILE = `${HOME_DIR}/.claude/channels/wechat/sync_buf.txt`;
-const LOG_DIR = `${HOME_DIR}/.claude/channels/wechat/logs`;
-const BOT_TYPE = "3";
+const _LOG_DIR = `${HOME_DIR}/.claude/channels/wechat/logs`;
+const _BOT_TYPE = "3";
 const CHANNEL_VERSION = "0.1.0";
 const LONG_POLL_TIMEOUT_MS = 35_000;
 const MSG_TYPE_USER = 1;
@@ -76,10 +77,7 @@ const MSG_ITEM_VOICE = 3;
 const MSG_STATE_FINISH = 2;
 
 // Conversation history per user
-const conversationHistory = new Map<
-  string,
-  Array<{ role: string; content: string }>
->();
+const conversationHistory = new Map<string, MessageParam[]>();
 const MAX_HISTORY = 10;
 
 // Logging
@@ -328,7 +326,7 @@ async function getClaudeResponse(
       max_tokens: 1024,
       system:
         "你是一个有帮助的AI助手。请用简洁、友好的方式回复，适合微信聊天场景。",
-      messages: history as any,
+      messages: history,
     });
 
     // Extract the response text
