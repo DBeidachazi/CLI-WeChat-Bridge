@@ -309,6 +309,8 @@ Docker 容器启动后，同一套链接会同步到：
 
 同步只管理共享文档和 `.linkai/skills` 投影出来的 shared skills，不会覆盖这些目录里已有的登录态、历史记录或其他 provider 私有文件。对于 shared skills，`.linkai/skills` 是权威来源；如果 `/root/.gemini/skills/video-download` 这类目标已经是旧的实体目录，启动同步会用 `.linkai/skills/video-download` 刷新它，避免 Docker 镜像更新后 provider 目录还停在旧脚本。
 
+AGENT随版本更新可以附加到可能由用户修改过的文档中，而内制skills作为权威来源会完全覆盖。
+
 如果你在服务器上使用已经发布到 Docker Hub 的镜像，执行：
 
 ```bash
