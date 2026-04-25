@@ -64,6 +64,7 @@ interface BridgeCliOptions {
   cwd: string;
   lifecycle: BridgeLifecycleMode;
   profile?: string;
+  renderMode?: "panel" | "companion" | "embedded";
 }
 
 interface ActiveTask {
@@ -346,8 +347,17 @@ export function formatDeferredCodexInboundQueueMessage(
 }
 
 function getRuntimeAdapterRenderMode(
-  adapter: BridgeAdapterKind
-): "companion" | undefined {
+  adapter: BridgeAdapterKind,
+  override?: "panel" | "companion" | "embedded"
+): "panel" | "companion" | undefined {
+  if (override === "panel" || override === "companion") {
+    return override;
+  }
+
+  if (override === "embedded") {
+    return undefined;
+  }
+
   return adapter === "gemini" || adapter === "copilot"
     ? "companion"
     : undefined;
@@ -407,6 +417,7 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
   let cwd = process.cwd();
   let profile: string | undefined;
   let lifecycle: BridgeLifecycleMode = "persistent";
+  let renderMode: "panel" | "companion" | "embedded" | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -460,6 +471,18 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
         lifecycle = next as BridgeLifecycleMode;
         i += 1;
         break;
+      case "--render-mode":
+        if (
+          !(
+            next &&
+            ["panel", "companion", "embedded"].includes(next)
+          )
+        ) {
+          throw new Error(`Invalid render mode: ${next ?? "(missing)"}`);
+        }
+        renderMode = next as "panel" | "companion" | "embedded";
+        i += 1;
+        break;
       case "--shutdown-on-parent-exit":
         lifecycle = "companion_bound";
         break;
@@ -485,13 +508,14 @@ export function parseCliArgs(argv: string[]): BridgeCliOptions {
     cwd,
     profile,
     lifecycle,
+    renderMode,
   };
 }
 
 function printUsageAndExit(): never {
   process.stdout.write(
     [
-      "Usage: wechat-bridge --adapter <codex|claude|opencode|gemini|copilot|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>]",
+      "Usage: wechat-bridge --adapter <codex|claude|opencode|gemini|copilot|shell> [--cmd <executable>] [--cwd <path>] [--profile <name-or-path>] [--lifecycle <persistent|companion_bound>] [--render-mode <panel|companion|embedded>]",
       "",
       "Examples:",
       "  wechat-bridge-codex",
@@ -610,7 +634,10 @@ async function main(): Promise<void> {
       stateStore.getState().sharedThreadId,
     initialResumeConversationId: stateStore.getState().resumeConversationId,
     initialTranscriptPath: stateStore.getState().transcriptPath,
-    renderMode: getRuntimeAdapterRenderMode(options.adapter),
+    renderMode: getRuntimeAdapterRenderMode(
+      options.adapter,
+      options.renderMode
+    ),
   });
   let textSendChain = Promise.resolve();
   let attachmentSendChain = Promise.resolve();
@@ -775,7 +802,10 @@ async function main(): Promise<void> {
       initialSharedSessionId: undefined,
       initialResumeConversationId: undefined,
       initialTranscriptPath: undefined,
-      renderMode: getRuntimeAdapterRenderMode(options.adapter),
+      renderMode: getRuntimeAdapterRenderMode(
+        options.adapter,
+        options.renderMode
+      ),
     });
     wireCurrentAdapter();
     await adapter.start();

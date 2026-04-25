@@ -84,6 +84,33 @@ describe("local-companion-start helpers", () => {
     ]);
   });
 
+  test("buildBackgroundBridgeArgs can force embedded render mode for ACP proxy launches", () => {
+    const args = buildBackgroundBridgeArgs(
+      "/tmp/wechat-bridge.ts",
+      {
+        adapter: "gemini",
+        cwd: path.resolve("./tmp/project"),
+        timeoutMs: 15_000,
+      },
+      "persistent",
+      "embedded"
+    );
+
+    expect(args).toEqual([
+      "--no-warnings",
+      "--experimental-strip-types",
+      "/tmp/wechat-bridge.ts",
+      "--adapter",
+      "gemini",
+      "--cwd",
+      path.resolve("./tmp/project"),
+      "--lifecycle",
+      "persistent",
+      "--render-mode",
+      "embedded",
+    ]);
+  });
+
   test("buildBackgroundBridgeArgs can launch claude in the background", () => {
     const args = buildBackgroundBridgeArgs("/tmp/wechat-bridge.ts", {
       adapter: "claude",

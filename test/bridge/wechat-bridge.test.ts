@@ -35,6 +35,17 @@ describe("wechat-bridge cli helpers", () => {
     expect(options.lifecycle).toBe("companion_bound");
   });
 
+  test("parseCliArgs accepts --render-mode embedded", () => {
+    const options = parseCliArgs([
+      "--adapter",
+      "gemini",
+      "--render-mode",
+      "embedded",
+    ]);
+
+    expect(options.renderMode).toBe("embedded");
+  });
+
   test("shouldWatchParentProcess watches attached terminal bridges", () => {
     expect(
       shouldWatchParentProcess({

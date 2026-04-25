@@ -32,6 +32,12 @@ import {
 
 type LocalCompanionLaunchAdapter = Exclude<BridgeAdapterKind, "shell">;
 
+function requiresProxyCompanionEndpoint(
+  adapter: LocalCompanionLaunchAdapter
+): boolean {
+  return adapter === "gemini" || adapter === "copilot";
+}
+
 interface LocalCompanionStartCliOptions {
   adapter: LocalCompanionLaunchAdapter;
   cwd: string;
@@ -283,7 +289,8 @@ async function readUsableEndpoint(
 export function buildBackgroundBridgeArgs(
   entryPath: string,
   options: LocalCompanionStartCliOptions,
-  lifecycle: BridgeLifecycleMode = "companion_bound"
+  lifecycle: BridgeLifecycleMode = "companion_bound",
+  renderMode?: "embedded"
 ): string[] {
   const args = [
     "--no-warnings",
@@ -296,6 +303,10 @@ export function buildBackgroundBridgeArgs(
     "--lifecycle",
     lifecycle,
   ];
+
+  if (renderMode) {
+    args.push("--render-mode", renderMode);
+  }
 
   if (options.profile) {
     args.push("--profile", options.profile);
@@ -610,10 +621,14 @@ function startBridgeInBackground(options: LocalCompanionStartCliOptions): void {
     "bridge",
     "wechat-bridge.ts"
   );
+  const renderMode = requiresProxyCompanionEndpoint(options.adapter)
+    ? "embedded"
+    : undefined;
   const args = buildBackgroundBridgeArgs(
     entryPath,
     options,
-    resolveStartBridgeLifecycle()
+    resolveStartBridgeLifecycle(),
+    renderMode
   );
   const mirroredFds = openContainerLogMirrorFds();
 
@@ -715,6 +730,17 @@ async function ensureBridgeReady(
   const endpointResult = await readUsableEndpoint(options.cwd, options.adapter);
   if (endpointResult.endpoint) {
     log(options.adapter, `Reusing running bridge for ${options.cwd}.`);
+    return;
+  }
+
+  if (requiresProxyCompanionEndpoint(options.adapter)) {
+    log(
+      options.adapter,
+      `Running bridge for ${options.cwd} has no local companion endpoint. Restarting it in proxy mode for the visible companion.`
+    );
+    await stopExistingBridge(lock, options.adapter);
+    startBridgeInBackground(options);
+    await waitForEndpoint(options.cwd, options.adapter, options.timeoutMs);
     return;
   }
 
