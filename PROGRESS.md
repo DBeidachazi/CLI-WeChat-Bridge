@@ -62,6 +62,7 @@
 - Fixed exfat/non-symlink shared skill refresh so `.linkai/skills` is authoritative on startup and stale real provider skill directories are overwritten with the current shared skill files.
 - Added WeChat typing keepalive for active bridge turns so long-running tasks refresh the top-of-chat sending indicator every 5 seconds instead of sending a visible progress notice message.
 - Raised the default WeChat video upload limit from 100MB to 300MB and aligned the shared `video-download` skill/docs so files under 300MB are sent without size-only downscaling.
+- Added `roadmap/wechat-manager.md` and linked it from `TODO.md` as the canonical staged plan for evolving the project from detached bridge scripts into a manager-driven supervisor architecture.
 
 ## In Progress
 
