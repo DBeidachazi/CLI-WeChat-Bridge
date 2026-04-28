@@ -11,9 +11,3 @@ services:
     working_dir: /app
     volumes:
       - ./home:/root
-    networks:
-      - openclaw-net
-
-networks:
-  openclaw-net:
-    external: true
